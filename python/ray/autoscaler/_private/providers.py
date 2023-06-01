@@ -42,6 +42,9 @@ def _import_azure(provider_config):
 
     return AzureNodeProvider
 
+def _import_vsphere(provider_config):
+    from ray.autoscaler._private.vsphere.node_provider import VsphereNodeProvider
+
 
 def _import_local(provider_config):
     if "coordinator_address" in provider_config:
@@ -152,6 +155,7 @@ _NODE_PROVIDERS = {
     "readonly": _import_readonly,
     "aws": _import_aws,
     "gcp": _import_gcp,
+    "vsphere": _import_vsphere,
     "azure": _import_azure,
     "kubernetes": _import_kubernetes,
     "kuberay": _import_kuberay,
