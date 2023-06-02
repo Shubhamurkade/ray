@@ -124,6 +124,10 @@ def _load_aws_defaults_config():
 
     return os.path.join(os.path.dirname(ray_aws.__file__), "defaults.yaml")
 
+def _load_vsphere_defaults_config():
+    import ray.autoscaler.vsphere as ray_vsphere
+
+    return os.path.join(os.path.dirname(ray_vsphere.__file__), "defaults.yaml")
 
 def _load_gcp_defaults_config():
     import ray.autoscaler.gcp as ray_gcp
@@ -185,6 +189,7 @@ _DEFAULT_CONFIGS = {
     "azure": _load_azure_defaults_config,
     "aliyun": _load_aliyun_defaults_config,
     "kubernetes": _load_kubernetes_defaults_config,
+    "vsphere": _load_vsphere_defaults_config
 }
 
 

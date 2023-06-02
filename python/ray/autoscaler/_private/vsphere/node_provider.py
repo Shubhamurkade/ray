@@ -6,9 +6,6 @@ import time
 from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List
 
-import botocore
-from boto3.resources.base import ServiceResource
-
 import ray._private.ray_constants as ray_constants
 from ray.autoscaler._private.aws.cloudwatch.cloudwatch_helper import (
     CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
@@ -22,7 +19,7 @@ from ray.autoscaler._private.aws.utils import (
     resource_cache,
 )
 from ray.autoscaler._private.cli_logger import cf, cli_logger
-from ray.autoscaler._private.constants import VSPHERE_MAX_RETRIES, BOTO_MAX_RETRIES
+from ray.autoscaler._private.constants import VSPHERE_MAX_RETRIES
 from ray.autoscaler._private.log_timer import LogTimer
 from ray.autoscaler.node_launch_exception import NodeLaunchException
 from ray.autoscaler.node_provider import NodeProvider
@@ -76,41 +73,13 @@ def from_aws_format(tags):
         del tags["Name"]
     return tags
 
-
-def make_vcenter_vm(max_retries, vsphere_credentials=None) -> ServiceResource:
-    """Make client, retrying requests up to `max_retries`."""
-    vsphere_credentials = vsphere_credentials or {}
-    return resource_cache("vm", max_retries, **vsphere_credentials)
+def make_vsphere_vm():
+    pass
 
 def list_ec2_instances(
     region: str, aws_credentials: Dict[str, Any] = None
 ) -> List[Dict[str, Any]]:
-    """Get all instance-types/resources available in the user's AWS region.
-    Args:
-        region: the region of the AWS provider. e.g., "us-west-2".
-    Returns:
-        final_instance_types: a list of instances. An example of one element in
-        the list:
-            {'InstanceType': 'm5a.xlarge', 'ProcessorInfo':
-            {'SupportedArchitectures': ['x86_64'], 'SustainedClockSpeedInGhz':
-            2.5},'VCpuInfo': {'DefaultVCpus': 4, 'DefaultCores': 2,
-            'DefaultThreadsPerCore': 2, 'ValidCores': [2],
-            'ValidThreadsPerCore': [1, 2]}, 'MemoryInfo': {'SizeInMiB': 16384},
-            ...}
-
-    """
-    final_instance_types = []
-    aws_credentials = aws_credentials or {}
-    ec2 = client_cache("ec2", region, BOTO_MAX_RETRIES, **aws_credentials)
-    instance_types = ec2.describe_instance_types()
-    final_instance_types.extend(copy.deepcopy(instance_types["InstanceTypes"]))
-    while "NextToken" in instance_types:
-        instance_types = ec2.describe_instance_types(
-            NextToken=instance_types["NextToken"]
-        )
-        final_instance_types.extend(copy.deepcopy(instance_types["InstanceTypes"]))
-
-    return final_instance_types
+    pass
 
 
 class VsphereNodeProvider(NodeProvider):
