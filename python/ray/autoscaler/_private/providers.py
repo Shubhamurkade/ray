@@ -45,6 +45,7 @@ def _import_azure(provider_config):
 def _import_vsphere(provider_config):
     from ray.autoscaler._private.vsphere.node_provider import VsphereNodeProvider
 
+    return VsphereNodeProvider
 
 def _import_local(provider_config):
     if "coordinator_address" in provider_config:

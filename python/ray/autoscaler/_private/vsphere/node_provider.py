@@ -7,17 +7,7 @@ from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List
 
 import ray._private.ray_constants as ray_constants
-from ray.autoscaler._private.aws.cloudwatch.cloudwatch_helper import (
-    CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
-    CLOUDWATCH_AGENT_INSTALLED_TAG,
-    CloudwatchHelper,
-)
-from ray.autoscaler._private.aws.config import bootstrap_aws
-from ray.autoscaler._private.aws.utils import (
-    boto_exception_handler,
-    client_cache,
-    resource_cache,
-)
+
 from ray.autoscaler._private.cli_logger import cf, cli_logger
 from ray.autoscaler._private.constants import VSPHERE_MAX_RETRIES
 from ray.autoscaler._private.log_timer import LogTimer
@@ -73,6 +63,10 @@ def from_aws_format(tags):
         del tags["Name"]
     return tags
 
+@staticmethod
+def bootstrap_config(cluster_config):
+    return cluster_config
+    
 def make_vsphere_vm():
     pass
 
@@ -116,42 +110,7 @@ class VsphereNodeProvider(NodeProvider):
         self.cached_nodes = {}
 
     def non_terminated_nodes(self, tag_filters):
-        # Note that these filters are acceptable because they are set on
-        #       node initialization, and so can never be sitting in the cache.
-        tag_filters = to_aws_format(tag_filters)
-        filters = [
-            {
-                "Name": "instance-state-name",
-                "Values": ["pending", "running"],
-            },
-            {
-                "Name": "tag:{}".format(TAG_RAY_CLUSTER_NAME),
-                "Values": [self.cluster_name],
-            },
-        ]
-        for k, v in tag_filters.items():
-            filters.append(
-                {
-                    "Name": "tag:{}".format(k),
-                    "Values": [v],
-                }
-            )
-
-        with boto_exception_handler("Failed to fetch running instances from AWS."):
-            nodes = list(self.ec2.instances.filter(Filters=filters))
-
-        # Populate the tag cache with initial information if necessary
-        for node in nodes:
-            if node.id in self.tag_cache:
-                continue
-
-            self.tag_cache[node.id] = from_aws_format(
-                {x["Key"]: x["Value"] for x in node.tags}
-            )
-
-        self.cached_nodes = {node.id: node for node in nodes}
-        nodes = []
-        return [node.id for node in nodes]
+        return [ ]
 
     def is_running(self, node_id):
         node = self._get_cached_node(node_id)
@@ -375,25 +334,6 @@ class VsphereNodeProvider(NodeProvider):
         else:
             node.terminate()
 
-        # TODO (Alex): We are leaking the tag cache here. Naively, we would
-        # want to just remove the cache entry here, but terminating can be
-        # asyncrhonous or error, which would result in a use after free error.
-        # If this leak becomes bad, we can garbage collect the tag cache when
-        # the node cache is updated.
-
-    def _check_ami_cwa_installation(self, config):
-        response = self.ec2.meta.client.describe_images(ImageIds=[config["ImageId"]])
-        cwa_installed = False
-        images = response.get("Images")
-        if images:
-            assert len(images) == 1, (
-                f"Expected to find only 1 AMI with the given ID, "
-                f"but found {len(images)}."
-            )
-            image_name = images[0].get("Name", "")
-            if CLOUDWATCH_AGENT_INSTALLED_AMI_TAG in image_name:
-                cwa_installed = True
-        return cwa_installed
 
     def terminate_nodes(self, node_ids):
         if not node_ids:
@@ -473,10 +413,6 @@ class VsphereNodeProvider(NodeProvider):
             return self.cached_nodes[node_id]
 
         return self._get_node(node_id)
-
-    @staticmethod
-    def bootstrap_config(cluster_config):
-        return bootstrap_aws(cluster_config)
 
     @staticmethod
     def fillout_available_node_types_resources(
