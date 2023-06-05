@@ -113,13 +113,14 @@ class VsphereNodeProvider(NodeProvider):
 
     def non_terminated_nodes(self, tag_filters):
     
-        return "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
+        return ["headcdb0e127-43b4-4941-a027-ec1ef0fa6011"]
 
     def is_running(self, node_id):
         node = self._get_cached_node(node_id)
         return node.state["Name"] == "running"
 
     def is_terminated(self, node_id):
+        return False
         node = self._get_cached_node(node_id)
         state = node.state["Name"]
         return state not in ["running", "pending"]
@@ -136,19 +137,20 @@ class VsphereNodeProvider(NodeProvider):
         vm = self.get_vm(self.vsphere_client, node_id)
 
         # Return the external IP of the VM
-        return self.client.vcenter.vm.guest.Identity.get(vm.ip_address)
+        print("External ip vm %s"%(vm))
+        vm = self.vsphere_client.vcenter.vm.guest.Identity.get(vm)
+
+        return vm.ip_address
 
     def internal_ip(self, node_id):
-        vm_name = "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
-
-        vm = self.get_vm(self.vsphere_client, vm_name)
-
         if node.private_ip_address is None:
             node = self._get_node(node_id)
 
         return node.private_ip_address
 
     def set_node_tags(self, node_id, tags):
+
+        return
         is_batching_thread = False
         with self.tag_cache_lock:
             if not self.tag_cache_pending:
@@ -259,76 +261,77 @@ class VsphereNodeProvider(NodeProvider):
 
         vm = vms[0].vm
         print("Found VM '{}' ({})".format(vm_name, vm))
+
         return vm
 
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
-        folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
-        folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
-        if not folder_summaries:
-            raise ValueError("Folder with name '{}' not found".
-                             format(self.foldername))
-        folder_id = folder_summaries[0].folder
-        cli_logger.print('Folder ID: {}'.format(folder_id))
+        # folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
+        # folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
+        # if not folder_summaries:
+        #     raise ValueError("Folder with name '{}' not found".
+        #                      format(self.foldername))
+        # folder_id = folder_summaries[0].folder
+        # cli_logger.print('Folder ID: {}'.format(folder_id))
     
-        rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
-        resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
-        if not resource_pool_summaries:
-            raise ValueError("Resource pool with name '{}' not found".
-                             format(self.resourcepoolname))
-        resource_pool_id = resource_pool_summaries[0].resource_pool
+        # rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
+        # resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
+        # if not resource_pool_summaries:
+        #     raise ValueError("Resource pool with name '{}' not found".
+        #                      format(self.resourcepoolname))
+        # resource_pool_id = resource_pool_summaries[0].resource_pool
 
-        cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
+        # cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
 
-        deployment_target = LibraryItem.DeploymentTarget(
-            resource_pool_id=resource_pool_id
-        )
+        # deployment_target = LibraryItem.DeploymentTarget(
+        #     resource_pool_id=resource_pool_id
+        # )
 
-        lib_item_id = "f350edec-46f6-4a7b-ad1a-8c7aeef198f6"
-        ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
-            ovf_library_item_id=lib_item_id,
-            target=deployment_target)
-        cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
+        # lib_item_id = "8657bc85-0359-4cb9-aa19-fb3c5b64ace9"
+        # ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
+        #     ovf_library_item_id=lib_item_id,
+        #     target=deployment_target)
+        # cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
 
-        vm_name = "head"+str(uuid.uuid4())
-        # Build the deployment spec
-        deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
-            name=vm_name,
-            annotation=ovf_summary.annotation,
-            accept_all_eula=True,
-            network_mappings=None,
-            storage_mappings=None,
-            storage_provisioning=None,
-            storage_profile_id=None,
-            locale=None,
-            flags=None,
-            additional_parameters=None,
-            default_datastore_id=None)
+        # vm_name = "head"+str(uuid.uuid4())
+        # # Build the deployment spec
+        # deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
+        #     name=vm_name,
+        #     annotation=ovf_summary.annotation,
+        #     accept_all_eula=True,
+        #     network_mappings=None,
+        #     storage_mappings=None,
+        #     storage_provisioning=None,
+        #     storage_profile_id=None,
+        #     locale=None,
+        #     flags=None,
+        #     additional_parameters=None,
+        #     default_datastore_id=None)
 
-        # Deploy the ovf template
-        result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
-            lib_item_id,
-            deployment_target,
-            deployment_spec,
-            client_token=str(uuid.uuid4()))
+        # # Deploy the ovf template
+        # result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
+        #     lib_item_id,
+        #     deployment_target,
+        #     deployment_spec,
+        #     client_token=str(uuid.uuid4()))
 
-        # The type and ID of the target deployment is available in the deployment result.
-        if result.succeeded:
-            cli_logger.print('Deployment successful. VM Name: "{}", ID: "{}"'
-                  .format(vm_name, result.resource_id.id))
-            self.vm_id = result.resource_id.id
-            error = result.error
-            if error is not None:
-                for warning in error.warnings:
-                    cli_logger.print('OVF warning: {}'.format(warning.message))
+        # # The type and ID of the target deployment is available in the deployment result.
+        # if result.succeeded:
+        #     cli_logger.print('Deployment successful. VM Name: "{}", ID: "{}"'
+        #           .format(vm_name, result.resource_id.id))
+        #     self.vm_id = result.resource_id.id
+        #     error = result.error
+        #     if error is not None:
+        #         for warning in error.warnings:
+        #             cli_logger.print('OVF warning: {}'.format(warning.message))
 
-        else:
-            cli_logger.print('Deployment failed.')
-            for error in result.error.errors:
-                cli_logger.print('OVF error: {}'.format(error.message))
+        # else:
+        #     cli_logger.print('Deployment failed.')
+        #     for error in result.error.errors:
+        #         cli_logger.print('OVF error: {}'.format(error.message))
             
-        #vm_name = "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
+        vm_name = "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
 
         vm = self.get_vm(self.vsphere_client, vm_name)
         status = self.vsphere_client.vcenter.vm.Power.get(vm)

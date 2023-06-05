@@ -109,6 +109,7 @@ class NodeUpdater:
             remote: os.path.expanduser(local) for remote, local in file_mounts.items()
         }
 
+        print("File mounts %s"%(self.file_mounts))
         self.initialization_commands = initialization_commands
         self.setup_commands = setup_commands
         self.ray_start_commands = ray_start_commands
@@ -132,6 +133,7 @@ class NodeUpdater:
         self.for_recovery = for_recovery
 
     def run(self):
+        cli_logger.print("In the run function")
         update_start_time = time.time()
         if (
             cmd_output_util.does_allow_interactive()
@@ -199,6 +201,7 @@ class NodeUpdater:
             nolog_paths = ["~/ray_bootstrap_key.pem", "~/ray_bootstrap_config.yaml"]
 
         def do_sync(remote_path, local_path, allow_non_existing_paths=False):
+            print("do_sync remote_path: %s, local_path: %s, "%(remote_path, local_path))
             if allow_non_existing_paths and not os.path.exists(local_path):
                 cli_logger.print("sync: {} does not exist. Skipping.", local_path)
                 # Ignore missing source files. In the future we should support
@@ -318,17 +321,22 @@ class NodeUpdater:
                         time.sleep(READY_CHECK_INTERVAL)
 
     def do_update(self):
+        
         self.provider.set_node_tags(
             self.node_id, {TAG_RAY_NODE_STATUS: STATUS_WAITING_FOR_SSH}
         )
+
+        cli_logger.print("Update call")
         cli_logger.labeled_value("New status", STATUS_WAITING_FOR_SSH)
 
         deadline = time.time() + AUTOSCALER_NODE_START_WAIT_S
+    
         self.wait_ready(deadline)
         global_event_system.execute_callback(CreateClusterEvent.ssh_control_acquired)
 
-        node_tags = self.provider.node_tags(self.node_id)
-        logger.debug("Node tags: {}".format(str(node_tags)))
+        # node_tags = self.provider.node_tags(self.node_id)
+        # logger.debug("Node tags: {}".format(str(node_tags)))
+        node_tags = {}
 
         if self.provider_type == "aws" and self.provider.provider_config:
             from ray.autoscaler._private.aws.cloudwatch.cloudwatch_helper import (
