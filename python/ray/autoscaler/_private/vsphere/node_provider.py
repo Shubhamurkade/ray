@@ -29,6 +29,8 @@ from com.vmware.content.library_client import ItemModel
 from com.vmware.vcenter_client import ResourcePool, Folder
 from com.vmware.vcenter.ovf_client import LibraryItem
 import uuid
+from com.vmware.vcenter_client import VM
+from com.vmware.vcenter.vm_client import Power as HardPower
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +112,8 @@ class VsphereNodeProvider(NodeProvider):
         self.cached_nodes = {}
 
     def non_terminated_nodes(self, tag_filters):
-        return [ ]
+    
+        return "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
 
     def is_running(self, node_id):
         node = self._get_cached_node(node_id)
@@ -128,15 +131,17 @@ class VsphereNodeProvider(NodeProvider):
             return dict(d1, **d2)
 
     def external_ip(self, node_id):
-        node = self._get_cached_node(node_id)
 
-        if node.public_ip_address is None:
-            node = self._get_node(node_id)
+        # node_id and vm_name are same for vsphere
+        vm = self.get_vm(self.vsphere_client, node_id)
 
-        return node.public_ip_address
+        # Return the external IP of the VM
+        return self.client.vcenter.vm.guest.Identity.get(vm.ip_address)
 
     def internal_ip(self, node_id):
-        node = self._get_cached_node(node_id)
+        vm_name = "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
+
+        vm = self.get_vm(self.vsphere_client, vm_name)
 
         if node.private_ip_address is None:
             node = self._get_node(node_id)
@@ -203,7 +208,7 @@ class VsphereNodeProvider(NodeProvider):
             created_nodes_dict = self._create_node(node_config, tags, count)
 
         # all_created_nodes = reused_nodes_dict
-        all_created_nodes = []
+        all_created_nodes = {}
         all_created_nodes.update(created_nodes_dict)
         return all_created_nodes
 
@@ -240,39 +245,56 @@ class VsphereNodeProvider(NodeProvider):
             else:
                 tag_specs += [user_tag_spec]
 
+    def get_vm(self, client, vm_name):
+        """
+        Return the identifier of a vm
+        Note: The method assumes that there is only one vm with the mentioned name.
+        """
+        names = set([vm_name])
+        vms = client.vcenter.VM.list(VM.FilterSpec(names=names))
+
+        if len(vms) == 0:
+            print("VM with name ({}) not found".format(vm_name))
+            return None
+
+        vm = vms[0].vm
+        print("Found VM '{}' ({})".format(vm_name, vm))
+        return vm
+
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
         folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
-        folder_summaries = self.client.vcenter.Folder.list(folder_filter_spec)
+        folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
         if not folder_summaries:
             raise ValueError("Folder with name '{}' not found".
                              format(self.foldername))
         folder_id = folder_summaries[0].folder
-        print('Folder ID: {}'.format(folder_id))
+        cli_logger.print('Folder ID: {}'.format(folder_id))
     
         rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
-        resource_pool_summaries = self.client.vcenter.ResourcePool.list(rp_filter_spec)
+        resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
         if not resource_pool_summaries:
             raise ValueError("Resource pool with name '{}' not found".
                              format(self.resourcepoolname))
         resource_pool_id = resource_pool_summaries[0].resource_pool
 
-        print('Resource pool ID: {}'.format(resource_pool_id))
+        cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
 
         deployment_target = LibraryItem.DeploymentTarget(
             resource_pool_id=resource_pool_id
         )
 
         lib_item_id = "f350edec-46f6-4a7b-ad1a-8c7aeef198f6"
-        ovf_summary = self.client.vcenter.ovf.LibraryItem.filter(
+        ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
             ovf_library_item_id=lib_item_id,
             target=deployment_target)
-        print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
+        cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
 
+        vm_name = "head"+str(uuid.uuid4())
         # Build the deployment spec
         deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
-            name="random",
+            name=vm_name,
             annotation=ovf_summary.annotation,
             accept_all_eula=True,
             network_mappings=None,
@@ -285,7 +307,7 @@ class VsphereNodeProvider(NodeProvider):
             default_datastore_id=None)
 
         # Deploy the ovf template
-        result = self.client.vcenter.ovf.LibraryItem.deploy(
+        result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
             lib_item_id,
             deployment_target,
             deployment_spec,
@@ -293,20 +315,29 @@ class VsphereNodeProvider(NodeProvider):
 
         # The type and ID of the target deployment is available in the deployment result.
         if result.succeeded:
-            print('Deployment successful. VM Name: "{}", ID: "{}"'
-                  .format(self.vm_name, result.resource_id.id))
+            cli_logger.print('Deployment successful. VM Name: "{}", ID: "{}"'
+                  .format(vm_name, result.resource_id.id))
             self.vm_id = result.resource_id.id
             error = result.error
             if error is not None:
                 for warning in error.warnings:
-                    print('OVF warning: {}'.format(warning.message))
+                    cli_logger.print('OVF warning: {}'.format(warning.message))
 
         else:
-            print('Deployment failed.')
+            cli_logger.print('Deployment failed.')
             for error in result.error.errors:
-                print('OVF error: {}'.format(error.message))
+                cli_logger.print('OVF error: {}'.format(error.message))
+            
+        #vm_name = "headcdb0e127-43b4-4941-a027-ec1ef0fa6011"
 
-        created_nodes_dict = {result.resource_id.id: result}
+        vm = self.get_vm(self.vsphere_client, vm_name)
+        status = self.vsphere_client.vcenter.vm.Power.get(vm)
+        if status != HardPower.Info(state=HardPower.State.POWERED_ON):
+            cli_logger.print("Powering on VM")
+            self.vsphere_client.vcenter.vm.Power.start(vm)
+            cli_logger.print('vm.Power.start({})'.format(vm))
+
+        created_nodes_dict = {vm_name: vm}
         
         return created_nodes_dict
 
