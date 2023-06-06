@@ -159,7 +159,7 @@ class VsphereNodeProvider(NodeProvider):
         return state not in ["running", "pending"]
 
     def node_tags(self, node_id):
-        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names=[node_id]))
+        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names={node_id}))
 
         vm_param = vms[0].vm
         yn_id = DynamicID(type="VirtualMachine", id=vm_param)
