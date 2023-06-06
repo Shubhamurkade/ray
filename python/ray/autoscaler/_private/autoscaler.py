@@ -458,7 +458,7 @@ class StandardAutoscaler:
         # )
         # self._report_pending_infeasible(unfulfilled)
 
-        to_launch = {2, NODE_KIND_WORKER}
+        to_launch = {NODE_KIND_WORKER, 2}
         unfulfilled = 2
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
@@ -1412,6 +1412,8 @@ class StandardAutoscaler:
         Returns:
             AutoscalerSummary: The summary.
         """
+
+        return
         # For type checking, assert that this object has been instantitiated.
         assert self.provider
 
