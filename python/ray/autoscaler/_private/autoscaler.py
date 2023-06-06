@@ -1333,6 +1333,7 @@ class StandardAutoscaler:
         ip = self.provider.external_ip(node_id)
         #node_type = self._get_node_type(node_id)
         #self.node_tracker.track(node_id, ip, node_type)
+        print("non terminated head %s"%(self.non_terminated_nodes.head_id))
         head_node_ip = self.provider.external_ip(self.non_terminated_nodes.head_id)
         updater = NodeUpdaterThread(
             node_id=node_id,
