@@ -129,7 +129,7 @@ class NonTerminatedNodes:
         self.head_id: Optional[NodeID] = None
 
         for node in self.all_node_ids:
-            node_kind = provider.node_tags(node)[TAG_RAY_NODE_KIND]
+            node_kind = NODE_KIND_WORKER
             if node_kind == NODE_KIND_WORKER:
                 self.worker_ids.append(node)
             elif node_kind == NODE_KIND_HEAD:
@@ -224,6 +224,7 @@ class StandardAutoscaler:
                 request to the GCS. Used to drain nodes before termination.
         """
 
+        print("Standard autoscalar")
         if isinstance(config_reader, str):
             # Auto wrap with file reader.
             def read_fn():
