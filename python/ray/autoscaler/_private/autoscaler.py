@@ -1495,7 +1495,7 @@ class StandardAutoscaler:
         )
 
     def info_string(self):
-        lm_summary = self.load_metrics.summary()
-        autoscaler_summary = self.summary()
-        assert autoscaler_summary
-        return "\n" + format_info_string(lm_summary, autoscaler_summary)
+        #lm_summary = self.load_metrics.summary()
+        #autoscaler_summary = self.summary()
+        #assert autoscaler_summary
+        return "testing\n"
