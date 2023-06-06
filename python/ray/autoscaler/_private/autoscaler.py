@@ -184,7 +184,8 @@ class StandardAutoscaler:
     StandardAutoscaler is also used to bootstrap clusters (by adding workers
     until the cluster size that can handle the resource demand is met).
     """
-
+    
+    worker_nums = 2
     def __init__(
         self,
         # TODO(ekl): require config reader to be a callable always.
@@ -458,7 +459,8 @@ class StandardAutoscaler:
         # )
         # self._report_pending_infeasible(unfulfilled)
 
-        to_launch = {NODE_KIND_WORKER: 2}
+        to_launch = {NODE_KIND_WORKER: worker_nums}
+        worker_nums = 0
         unfulfilled = 2
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
