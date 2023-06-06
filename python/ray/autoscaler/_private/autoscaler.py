@@ -129,7 +129,7 @@ class NonTerminatedNodes:
         self.head_id: Optional[NodeID] = None
 
         for node in self.all_node_ids:
-            node_kind = NODE_KIND_WORKER
+            node_kind = NODE_KIND_HEAD
             if node_kind == NODE_KIND_WORKER:
                 self.worker_ids.append(node)
             elif node_kind == NODE_KIND_HEAD:
@@ -416,48 +416,50 @@ class StandardAutoscaler:
         self.prom_metrics.running_workers.set(num_workers)
 
         # Remove from LoadMetrics the ips unknown to the NodeProvider.
-        self.load_metrics.prune_active_ips(
-            active_ips=[
-                self.provider.internal_ip(node_id)
-                for node_id in self.non_terminated_nodes.all_node_ids
-            ]
-        )
+        # self.load_metrics.prune_active_ips(
+        #     active_ips=[
+        #         self.provider.internal_ip(node_id)
+        #         for node_id in self.non_terminated_nodes.all_node_ids
+        #     ]
+        # )
 
         # Update status strings
         if AUTOSCALER_STATUS_LOG:
             logger.info(self.info_string())
         legacy_log_info_string(self, self.non_terminated_nodes.worker_ids)
 
-        if not self.provider.is_readonly():
-            self.terminate_nodes_to_enforce_config_constraints(now)
+        # if not self.provider.is_readonly():
+        #     self.terminate_nodes_to_enforce_config_constraints(now)
 
-            if self.disable_node_updaters:
-                # Don't handle unhealthy nodes if the liveness check is disabled.
-                # self.worker_liveness_check is True by default.
-                if self.worker_liveness_check:
-                    self.terminate_unhealthy_nodes(now)
-            else:
-                self.process_completed_updates()
-                self.update_nodes()
-                # Don't handle unhealthy nodes if the liveness check is disabled.
-                # self.worker_liveness_check is True by default.
-                if self.worker_liveness_check:
-                    self.attempt_to_recover_unhealthy_nodes(now)
-                self.set_prometheus_updater_data()
+        #     if self.disable_node_updaters:
+        #         # Don't handle unhealthy nodes if the liveness check is disabled.
+        #         # self.worker_liveness_check is True by default.
+        #         if self.worker_liveness_check:
+        #             self.terminate_unhealthy_nodes(now)
+        #     else:
+        #         self.process_completed_updates()
+        #         self.update_nodes()
+        #         # Don't handle unhealthy nodes if the liveness check is disabled.
+        #         # self.worker_liveness_check is True by default.
+        #         if self.worker_liveness_check:
+        #             self.attempt_to_recover_unhealthy_nodes(now)
+        #         self.set_prometheus_updater_data()
 
         # Dict[NodeType, int], List[ResourceDict]
-        to_launch, unfulfilled = self.resource_demand_scheduler.get_nodes_to_launch(
-            self.non_terminated_nodes.all_node_ids,
-            self.pending_launches.breakdown(),
-            self.load_metrics.get_resource_demand_vector(),
-            self.load_metrics.get_resource_utilization(),
-            self.load_metrics.get_pending_placement_groups(),
-            self.load_metrics.get_static_node_resources_by_ip(),
-            ensure_min_cluster_size=self.load_metrics.get_resource_requests(),
-            node_availability_summary=self.node_provider_availability_tracker.summary(),
-        )
-        self._report_pending_infeasible(unfulfilled)
+        # to_launch, unfulfilled = self.resource_demand_scheduler.get_nodes_to_launch(
+        #     self.non_terminated_nodes.all_node_ids,
+        #     self.pending_launches.breakdown(),
+        #     self.load_metrics.get_resource_demand_vector(),
+        #     self.load_metrics.get_resource_utilization(),
+        #     self.load_metrics.get_pending_placement_groups(),
+        #     self.load_metrics.get_static_node_resources_by_ip(),
+        #     ensure_min_cluster_size=self.load_metrics.get_resource_requests(),
+        #     node_availability_summary=self.node_provider_availability_tracker.summary(),
+        # )
+        # self._report_pending_infeasible(unfulfilled)
 
+        to_launch = {2, NODE_KIND_WORKER}
+        unfulfilled = 2
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
 
