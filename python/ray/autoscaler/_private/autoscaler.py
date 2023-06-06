@@ -121,7 +121,7 @@ class NonTerminatedNodes:
     def __init__(self, provider: NodeProvider):
         start_time = time.time()
         # All non-terminated nodes
-        self.all_node_ids = provider.non_terminated_nodes({})
+        self.all_node_ids = provider.non_terminated_nodes([])
 
         # Managed worker nodes (node kind "worker"):
         self.worker_ids: List[NodeID] = []
@@ -129,7 +129,7 @@ class NonTerminatedNodes:
         self.head_id: Optional[NodeID] = None
 
         for node in self.all_node_ids:
-            node_kind = NODE_KIND_HEAD
+            node_kind = provider.node_tags(node)
             if node_kind == NODE_KIND_WORKER:
                 self.worker_ids.append(node)
             elif node_kind == NODE_KIND_HEAD:
@@ -429,6 +429,7 @@ class StandardAutoscaler:
             logger.info(self.info_string())
         legacy_log_info_string(self, self.non_terminated_nodes.worker_ids)
 
+        self.update_nodes()
         # if not self.provider.is_readonly():
         #     self.terminate_nodes_to_enforce_config_constraints(now)
 
@@ -1023,11 +1024,11 @@ class StandardAutoscaler:
         return KeepOrTerminate.decide_later, None
 
     def _node_resources(self, node_id):
-        node_type = self.provider.node_tags(node_id).get(TAG_RAY_USER_NODE_TYPE)
-        if self.available_node_types:
-            return self.available_node_types.get(node_type, {}).get("resources", {})
-        else:
-            return {}
+        # node_type = self.provider.node_tags(node_id).get(TAG_RAY_USER_NODE_TYPE)
+        # if self.available_node_types:
+        #     return self.available_node_types.get(node_type, {}).get("resources", {})
+        # else:
+        return {}
 
     def reset(self, errors_fatal=False):
         sync_continuously = False
@@ -1286,37 +1287,36 @@ class StandardAutoscaler:
         if "docker" not in self.config:
             return {}
         docker_config = copy.deepcopy(self.config.get("docker", {}))
-        node_specific_docker = self._get_node_type_specific_fields(node_id, "docker")
-        docker_config.update(node_specific_docker)
+        # node_specific_docker = self._get_node_type_specific_fields(node_id, "docker")
+        # docker_config.update(node_specific_docker)
         return docker_config
 
     def should_update(self, node_id):
-        if not self.can_update(node_id):
-            return UpdateInstructions(None, None, None, None)  # no update
+        # if not self.can_update(node_id):
+        #     return UpdateInstructions(None, None, None, None)  # no update
 
-        status = self.provider.node_tags(node_id).get(TAG_RAY_NODE_STATUS)
-        if status == STATUS_UP_TO_DATE and self.files_up_to_date(node_id):
-            return UpdateInstructions(None, None, None, None)  # no update
+        # status = self.provider.node_tags(node_id).get(TAG_RAY_NODE_STATUS)
+        # if status == STATUS_UP_TO_DATE and self.files_up_to_date(node_id):
+        #     return UpdateInstructions(None, None, None, None)  # no update
 
-        successful_updated = self.num_successful_updates.get(node_id, 0) > 0
-        if successful_updated and self.config.get("restart_only", False):
-            setup_commands = []
-            ray_start_commands = self.config["worker_start_ray_commands"]
-        elif successful_updated and self.config.get("no_restart", False):
-            setup_commands = self._get_node_type_specific_fields(
-                node_id, "worker_setup_commands"
-            )
-            ray_start_commands = []
-        else:
-            setup_commands = self._get_node_type_specific_fields(
-                node_id, "worker_setup_commands"
-            )
-            ray_start_commands = self.config["worker_start_ray_commands"]
+        # successful_updated = self.num_successful_updates.get(node_id, 0) > 0
+        # if successful_updated and self.config.get("restart_only", False):
+        #     setup_commands = []
+        #     ray_start_commands = self.config["worker_start_ray_commands"]
+        # elif successful_updated and self.config.get("no_restart", False):
+        #     setup_commands = self._get_node_type_specific_fields(
+        #         node_id, "worker_setup_commands"
+        #     )
+        #     ray_start_commands = []
+        # else:
+        #     setup_commands = self._get_node_type_specific_fields(
+        #         node_id, "worker_setup_commands"
+        #     )
+        ray_start_commands = self.config["worker_start_ray_commands"]
 
         docker_config = self._get_node_specific_docker_config(node_id)
         return UpdateInstructions(
             node_id=node_id,
-            setup_commands=setup_commands,
             ray_start_commands=ray_start_commands,
             docker_config=docker_config,
         )
@@ -1327,10 +1327,10 @@ class StandardAutoscaler:
         logger.info(
             f"Creating new (spawn_updater) updater thread for node" f" {node_id}."
         )
-        ip = self.provider.internal_ip(node_id)
-        node_type = self._get_node_type(node_id)
-        self.node_tracker.track(node_id, ip, node_type)
-        head_node_ip = self.provider.internal_ip(self.non_terminated_nodes.head_id)
+        ip = self.provider.external_ip(node_id)
+        #node_type = self._get_node_type(node_id)
+        #self.node_tracker.track(node_id, ip, node_type)
+        head_node_ip = self.provider.external_ip(self.non_terminated_nodes.head_id)
         updater = NodeUpdaterThread(
             node_id=node_id,
             provider_config=self.config["provider"],
@@ -1353,7 +1353,7 @@ class StandardAutoscaler:
                 "rsync_filter": self.config.get("rsync_filter"),
             },
             process_runner=self.process_runner,
-            use_internal_ip=True,
+            use_internal_ip=False,
             docker_config=docker_config,
             node_resources=node_resources,
         )

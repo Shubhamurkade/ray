@@ -1,5 +1,7 @@
 import copy
+from email import headerregistry
 import logging
+from socket import if_indextoname
 import sys
 import threading
 import time
@@ -31,6 +33,9 @@ from com.vmware.vcenter.ovf_client import LibraryItem
 import uuid
 from com.vmware.vcenter_client import VM
 from com.vmware.vcenter.vm_client import Power as HardPower
+from com.vmware.vapi.std_client import DynamicID
+
+from python.ray.autoscaler.tags import NODE_KIND_HEAD, NODE_KIND_WORKER
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +82,16 @@ def list_ec2_instances(
 ) -> List[Dict[str, Any]]:
     pass
 
+RAY_HEAD_TAG = "ray-head"
+RAY_WORKER_TAG = "ray-worker"
+tag_to_id = {RAY_HEAD_TAG: "urn:vmomi:InventoryServiceTag:c24d3cc8-8ca3-422c-8836-1623e94f7d07:GLOBAL", 
+             RAY_WORKER_TAG: "urn:vmomi:InventoryServiceTag:028b3f5a-21ab-4b4f-968b-4c8869ef1b39:GLOBAL"
+             }
+
+tag_id_to_tag = {
+    "urn:vmomi:InventoryServiceTag:c24d3cc8-8ca3-422c-8836-1623e94f7d07:GLOBAL": RAY_HEAD_TAG, 
+    "urn:vmomi:InventoryServiceTag:028b3f5a-21ab-4b4f-968b-4c8869ef1b39:GLOBAL": RAY_WORKER_TAG
+}
 
 class VsphereNodeProvider(NodeProvider):
     max_terminate_nodes = 1000
@@ -112,8 +127,23 @@ class VsphereNodeProvider(NodeProvider):
         self.cached_nodes = {}
 
     def non_terminated_nodes(self, tag_filters):
-    
-        return ["headcdb0e127-43b4-4941-a027-ec1ef0fa6011"]
+        
+        nodes = []
+        vms = self.client.vcenter.VM.list(VM.FilterSpec())
+
+        for vm in vms:
+            yn_id = DynamicID(type="VirtualMachine", id=vm)
+
+            vm_info = self.client.vcenter.VM.get(vm)
+            for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
+                print("tag attached: %s"%(tag_id))
+
+                if len(tag_filters) == 0:
+                    nodes.insert(vm_info["name"])
+                elif tag_id_to_tag[tag_id] == tag_filters[0]:
+                    nodes.insert(vm_info["name"])
+
+        return nodes
 
     def is_running(self, node_id):
         node = self._get_cached_node(node_id)
@@ -126,10 +156,14 @@ class VsphereNodeProvider(NodeProvider):
         return state not in ["running", "pending"]
 
     def node_tags(self, node_id):
-        with self.tag_cache_lock:
-            d1 = self.tag_cache[node_id]
-            d2 = self.tag_cache_pending.get(node_id, {})
-            return dict(d1, **d2)
+        vms = self.client.vcenter.VM.list(VM.FilterSpec(names=[node_id]))
+        yn_id = DynamicID(type="VirtualMachine", id=vms[0])
+        for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
+            print("tag attached: %s"%(tag_id))
+            if tag_id == "urn:vmomi:InventoryServiceTag:c24d3cc8-8ca3-422c-8836-1623e94f7d07:GLOBAL":
+                return NODE_KIND_HEAD
+            elif tag_id == "urn:vmomi:InventoryServiceTag:028b3f5a-21ab-4b4f-968b-4c8869ef1b39:GLOBAL":
+                return NODE_KIND_WORKER
 
     def external_ip(self, node_id):
 
@@ -339,6 +373,9 @@ class VsphereNodeProvider(NodeProvider):
             self.vsphere_client.vcenter.vm.Power.start(vm)
             cli_logger.print('vm.Power.start({})'.format(vm))
 
+        for tag in tags:
+            self.attach_tag(vm, "VirtualMachine", tag_to_id[tag])
+           
         created_nodes_dict = {vm_name: vm}
         
         return created_nodes_dict
