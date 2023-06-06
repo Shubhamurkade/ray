@@ -460,8 +460,8 @@ class StandardAutoscaler:
         # )
         # self._report_pending_infeasible(unfulfilled)
 
-        to_launch = {NODE_KIND_WORKER: worker_nums}
-        worker_nums = 0
+        to_launch = {NODE_KIND_WORKER: self.worker_nums}
+        self.worker_nums = 0
         unfulfilled = 2
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
