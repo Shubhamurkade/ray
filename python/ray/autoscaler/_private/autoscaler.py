@@ -1317,6 +1317,7 @@ class StandardAutoscaler:
         docker_config = self._get_node_specific_docker_config(node_id)
         return UpdateInstructions(
             node_id=node_id,
+            setup_commands=[],
             ray_start_commands=ray_start_commands,
             docker_config=docker_config,
         )
