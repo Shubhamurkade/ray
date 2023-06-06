@@ -35,7 +35,7 @@ from com.vmware.vcenter_client import VM
 from com.vmware.vcenter.vm_client import Power as HardPower
 from com.vmware.vapi.std_client import DynamicID
 
-from python.ray.autoscaler.tags import NODE_KIND_HEAD, NODE_KIND_WORKER
+from ray.autoscaler.tags import NODE_KIND_HEAD, NODE_KIND_WORKER
 
 logger = logging.getLogger(__name__)
 
@@ -129,19 +129,22 @@ class VsphereNodeProvider(NodeProvider):
     def non_terminated_nodes(self, tag_filters):
         
         nodes = []
-        vms = self.client.vcenter.VM.list(VM.FilterSpec())
+        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec())
 
         for vm in vms:
-            yn_id = DynamicID(type="VirtualMachine", id=vm)
 
-            vm_info = self.client.vcenter.VM.get(vm)
+            vm_param = vm.vm
+            yn_id = DynamicID(type="VirtualMachine", id=vm_param)
+
+            print("vm is %s"%(vm_param))
+            vm_info = self.vsphere_client.vcenter.VM.get(vm_param)
             for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
                 print("tag attached: %s"%(tag_id))
 
                 if len(tag_filters) == 0:
-                    nodes.insert(vm_info["name"])
-                elif tag_id_to_tag[tag_id] == tag_filters[0]:
-                    nodes.insert(vm_info["name"])
+                    nodes.append(vm_info.name)
+                elif tag_id in tag_id_to_tag and tag_id_to_tag[tag_id] == tag_filters[0]:
+                    nodes.append(vm_info.name)
 
         return nodes
 
@@ -156,8 +159,10 @@ class VsphereNodeProvider(NodeProvider):
         return state not in ["running", "pending"]
 
     def node_tags(self, node_id):
-        vms = self.client.vcenter.VM.list(VM.FilterSpec(names=[node_id]))
-        yn_id = DynamicID(type="VirtualMachine", id=vms[0])
+        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names=[node_id]))
+
+        vm_param = vms[0].vm
+        yn_id = DynamicID(type="VirtualMachine", id=vm_param)
         for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
             print("tag attached: %s"%(tag_id))
             if tag_id == "urn:vmomi:InventoryServiceTag:c24d3cc8-8ca3-422c-8836-1623e94f7d07:GLOBAL":
@@ -298,74 +303,82 @@ class VsphereNodeProvider(NodeProvider):
 
         return vm
 
+    def attach_tag(self, inv_obj, inv_type, tag_id):
+        dyn_id = DynamicID(type=inv_type, id=inv_obj)
+        try:
+            self.vsphere_client.tagging.TagAssociation.attach(tag_id, dyn_id)
+        except Exception as e:
+            print("Check that the tag is associable to {}".format(inv_type))
+            raise e
+        
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
-        folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
-        folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
-        if not folder_summaries:
-            raise ValueError("Folder with name '{}' not found".
-                             format(self.foldername))
-        folder_id = folder_summaries[0].folder
-        cli_logger.print('Folder ID: {}'.format(folder_id))
+        # folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
+        # folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
+        # if not folder_summaries:
+        #     raise ValueError("Folder with name '{}' not found".
+        #                      format(self.foldername))
+        # folder_id = folder_summaries[0].folder
+        # cli_logger.print('Folder ID: {}'.format(folder_id))
     
-        rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
-        resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
-        if not resource_pool_summaries:
-            raise ValueError("Resource pool with name '{}' not found".
-                             format(self.resourcepoolname))
-        resource_pool_id = resource_pool_summaries[0].resource_pool
+        # rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
+        # resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
+        # if not resource_pool_summaries:
+        #     raise ValueError("Resource pool with name '{}' not found".
+        #                      format(self.resourcepoolname))
+        # resource_pool_id = resource_pool_summaries[0].resource_pool
 
-        cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
+        # cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
 
-        deployment_target = LibraryItem.DeploymentTarget(
-            resource_pool_id=resource_pool_id
-        )
+        # deployment_target = LibraryItem.DeploymentTarget(
+        #     resource_pool_id=resource_pool_id
+        # )
 
-        lib_item_id = "88b5b6cd-475d-4896-933d-590b690fed80"
-        ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
-            ovf_library_item_id=lib_item_id,
-            target=deployment_target)
-        cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
+        # lib_item_id = "88b5b6cd-475d-4896-933d-590b690fed80"
+        # ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
+        #     ovf_library_item_id=lib_item_id,
+        #     target=deployment_target)
+        # cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
 
-        vm_name = "ray-node"+str(uuid.uuid4())
-        # Build the deployment spec
-        deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
-            name=vm_name,
-            annotation=ovf_summary.annotation,
-            accept_all_eula=True,
-            network_mappings=None,
-            storage_mappings=None,
-            storage_provisioning=None,
-            storage_profile_id=None,
-            locale=None,
-            flags=None,
-            additional_parameters=None,
-            default_datastore_id=None)
+        # vm_name = "ray-node"+str(uuid.uuid4())
+        # # Build the deployment spec
+        # deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
+        #     name=vm_name,
+        #     annotation=ovf_summary.annotation,
+        #     accept_all_eula=True,
+        #     network_mappings=None,
+        #     storage_mappings=None,
+        #     storage_provisioning=None,
+        #     storage_profile_id=None,
+        #     locale=None,
+        #     flags=None,
+        #     additional_parameters=None,
+        #     default_datastore_id=None)
 
-        # Deploy the ovf template
-        result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
-            lib_item_id,
-            deployment_target,
-            deployment_spec,
-            client_token=str(uuid.uuid4()))
+        # # Deploy the ovf template
+        # result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
+        #     lib_item_id,
+        #     deployment_target,
+        #     deployment_spec,
+        #     client_token=str(uuid.uuid4()))
 
-        # The type and ID of the target deployment is available in the deployment result.
-        if result.succeeded:
-            cli_logger.print('Deployment successful. VM Name: "{}", ID: "{}"'
-                  .format(vm_name, result.resource_id.id))
-            self.vm_id = result.resource_id.id
-            error = result.error
-            if error is not None:
-                for warning in error.warnings:
-                    cli_logger.print('OVF warning: {}'.format(warning.message))
+        # # The type and ID of the target deployment is available in the deployment result.
+        # if result.succeeded:
+        #     cli_logger.print('Deployment successful. VM Name: "{}", ID: "{}"'
+        #           .format(vm_name, result.resource_id.id))
+        #     self.vm_id = result.resource_id.id
+        #     error = result.error
+        #     if error is not None:
+        #         for warning in error.warnings:
+        #             cli_logger.print('OVF warning: {}'.format(warning.message))
 
-        else:
-            cli_logger.print('Deployment failed.')
-            for error in result.error.errors:
-                cli_logger.print('OVF error: {}'.format(error.message))
+        # else:
+        #     cli_logger.print('Deployment failed.')
+        #     for error in result.error.errors:
+        #         cli_logger.print('OVF error: {}'.format(error.message))
             
-
+        vm_name = "ray-node74fad9d1-7c28-4c07-8835-27556ce118f8"
         vm = self.get_vm(self.vsphere_client, vm_name)
         status = self.vsphere_client.vcenter.vm.Power.get(vm)
         if status != HardPower.Info(state=HardPower.State.POWERED_ON):
@@ -426,7 +439,7 @@ class VsphereNodeProvider(NodeProvider):
 
             for node_id in node_ids:
                 if self._get_cached_node(node_id).spot_instance_request_id:
-                    spot_ids += [node_id]
+                    spotð_ids += [node_id]
                 else:
                     on_demand_ids += [node_id]
 
