@@ -164,7 +164,7 @@ class VsphereNodeProvider(NodeProvider):
         vm_param = vms[0].vm
         yn_id = DynamicID(type="VirtualMachine", id=vm_param)
         for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
-            print("tag attached: %s"%(tag_id))
+            print("tag attached: %s on vm: %s"%(tag_id, node_id))
             if tag_id == "urn:vmomi:InventoryServiceTag:c24d3cc8-8ca3-422c-8836-1623e94f7d07:GLOBAL":
                 return NODE_KIND_HEAD
             elif tag_id == "urn:vmomi:InventoryServiceTag:028b3f5a-21ab-4b4f-968b-4c8869ef1b39:GLOBAL":

@@ -123,6 +123,7 @@ class NonTerminatedNodes:
         # All non-terminated nodes
         self.all_node_ids = provider.non_terminated_nodes([])
 
+        print("all nodes %s"%(self.all_node_ids))
         # Managed worker nodes (node kind "worker"):
         self.worker_ids: List[NodeID] = []
         # The head node (node kind "head")
