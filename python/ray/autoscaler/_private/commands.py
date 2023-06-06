@@ -1370,6 +1370,8 @@ def _get_running_head_node(
         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
     }
     nodes = provider.non_terminated_nodes(head_node_tags)
+
+    return nodes[0]
     head_node = None
     _backup_head_node = None
     for node in nodes:
