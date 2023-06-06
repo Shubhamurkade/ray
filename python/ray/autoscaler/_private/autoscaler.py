@@ -134,6 +134,7 @@ class NonTerminatedNodes:
             if node_kind == NODE_KIND_WORKER:
                 self.worker_ids.append(node)
             elif node_kind == NODE_KIND_HEAD:
+                print("Found head %s"%(node))
                 self.head_id = node
 
         # Note: For typical use-cases, self.all_node_ids == self.worker_ids +
