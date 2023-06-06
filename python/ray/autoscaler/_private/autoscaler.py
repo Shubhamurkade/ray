@@ -137,6 +137,7 @@ class NonTerminatedNodes:
                 print("Found head %s"%(node))
                 self.head_id = node
 
+        print("Found workers %s"%(self.worker_ids))
         # Note: For typical use-cases, self.all_node_ids == self.worker_ids +
         # [self.head_id]. The difference being in the case of unmanaged nodes.
 
