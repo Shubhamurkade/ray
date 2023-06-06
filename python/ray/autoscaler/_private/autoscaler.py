@@ -474,7 +474,7 @@ class StandardAutoscaler:
             f"The autoscaler took {round(update_time, 3)}"
             " seconds to complete the update iteration."
         )
-        self.prom_metrics.update_time.observe(update_time)
+        #self.prom_metrics.update_time.observe(update_time)
 
     def terminate_nodes_to_enforce_config_constraints(self, now: float):
         """Terminates nodes to enforce constraints defined by the autoscaling
