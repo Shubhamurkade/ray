@@ -500,7 +500,7 @@ class NodeUpdater:
             global_event_system.execute_callback(CreateClusterEvent.start_ray_runtime)
             with LogTimer(self.log_prefix + "Ray start commands", show_status=True):
                 for cmd in self.ray_start_commands:
-
+                    print("Trying to run command %s"%(cmd))
                     env_vars = {}
                     if self.is_head_node:
                         if usage_lib.usage_stats_enabled():
@@ -521,6 +521,8 @@ class NodeUpdater:
                         old_redirected = cmd_output_util.is_output_redirected()
                         cmd_output_util.set_output_redirected(False)
                         # Runs in the container if docker is in use
+
+                        print("Execute command runner for command %s"%(cmd))
                         self.cmd_runner.run(
                             cmd, environment_variables=env_vars, run_env="auto"
                         )
