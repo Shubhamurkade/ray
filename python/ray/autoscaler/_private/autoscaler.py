@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple, U
 
 import grpc
 import yaml
+from com.vmware.vcenter_client import VM
+from com.vmware.vapi.std_client import DynamicID
 
 from ray.autoscaler._private.constants import (
     AUTOSCALER_HEARTBEAT_TIMEOUT_S,
@@ -1225,7 +1227,7 @@ class StandardAutoscaler:
     def attempt_to_recover_unhealthy_nodes(self, now):
         for node_id in self.non_terminated_nodes.worker_ids:
             self.recover_if_needed(node_id, now)
-
+    
     def recover_if_needed(self, node_id, now):
         if not self.can_update(node_id):
             return
@@ -1374,7 +1376,26 @@ class StandardAutoscaler:
         print("Updating self.updater for node %s"%(node_id))
         self.updaters[node_id] = updater
 
+        # Add a tag to signify the node was
+        vm = self.provider.get_vm(node_id)
+        self.provider.attach_tag(vm, "VirtualMachine", "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL")
+
     def can_update(self, node_id):
+
+        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names={node_id}))
+ 
+        vm_param = vms[0].vm
+
+        yn_id = DynamicID(type="VirtualMachine", id=vm_param)
+
+        for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
+            if tag_id == "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL":
+                print("node %s already upated no need to update again"%(node_id))
+                return False
+            
+        print("Can update node: %s"%(node_id))
+        return True
+    
         if self.disable_node_updaters:
             print("disable_node_updaters node: %s"%(node_id))
             return False

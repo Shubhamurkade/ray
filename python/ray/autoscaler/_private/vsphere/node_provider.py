@@ -173,7 +173,7 @@ class VsphereNodeProvider(NodeProvider):
     def external_ip(self, node_id):
 
         # node_id and vm_name are same for vsphere
-        vm = self.get_vm(self.vsphere_client, node_id)
+        vm = self.get_vm(node_id)
 
         # Return the external IP of the VM
         print("External ip vm %s"%(vm))
@@ -286,13 +286,13 @@ class VsphereNodeProvider(NodeProvider):
             else:
                 tag_specs += [user_tag_spec]
 
-    def get_vm(self, client, vm_name):
+    def get_vm(self, vm_name):
         """
         Return the identifier of a vm
         Note: The method assumes that there is only one vm with the mentioned name.
         """
         names = set([vm_name])
-        vms = client.vcenter.VM.list(VM.FilterSpec(names=names))
+        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names=names))
 
         if len(vms) == 0:
             print("VM with name ({}) not found".format(vm_name))
@@ -380,7 +380,7 @@ class VsphereNodeProvider(NodeProvider):
                 for error in result.error.errors:
                     cli_logger.print('OVF error: {}'.format(error.message))
                 
-            vm = self.get_vm(self.vsphere_client, vm_name)
+            vm = self.get_vm(vm_name)
             status = self.vsphere_client.vcenter.vm.Power.get(vm)
             if status != HardPower.Info(state=HardPower.State.POWERED_ON):
                 cli_logger.print("Powering on VM")
