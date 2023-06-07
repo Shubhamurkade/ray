@@ -335,7 +335,7 @@ class VsphereNodeProvider(NodeProvider):
             resource_pool_id=resource_pool_id
         )
 
-        lib_item_id = "88b5b6cd-475d-4896-933d-590b690fed80"
+        lib_item_id = "7534d35a-2d9c-4a4f-9ecd-0e1f4f6363ec"
         ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
             ovf_library_item_id=lib_item_id,
             target=deployment_target)
