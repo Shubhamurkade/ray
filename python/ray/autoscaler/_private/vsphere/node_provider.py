@@ -158,6 +158,19 @@ class VsphereNodeProvider(NodeProvider):
         state = node.state["Name"]
         return state not in ["running", "pending"]
 
+    def does_vm_contain_tag(self, node_id, tag_id_to_compare):
+        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names={node_id}))
+ 
+        vm_param = vms[0].vm
+
+        yn_id = DynamicID(type="VirtualMachine", id=vm_param)
+
+        for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
+            if tag_id == tag_id_to_compare:
+                return True
+        
+        return False
+            
     def node_tags(self, node_id):
         vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names={node_id}))
 

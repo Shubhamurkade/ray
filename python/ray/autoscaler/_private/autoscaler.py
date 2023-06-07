@@ -1382,16 +1382,9 @@ class StandardAutoscaler:
 
     def can_update(self, node_id):
 
-        vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names={node_id}))
- 
-        vm_param = vms[0].vm
-
-        yn_id = DynamicID(type="VirtualMachine", id=vm_param)
-
-        for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
-            if tag_id == "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL":
-                print("node %s already upated no need to update again"%(node_id))
-                return False
+        if self.does_vm_contain_tag(node_id, "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL"):
+            print("node %s already upated no need to update again"%(node_id))
+            return False
             
         print("Can update node: %s"%(node_id))
         return True
