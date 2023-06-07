@@ -433,10 +433,6 @@ class StandardAutoscaler:
             logger.info(self.info_string())
         legacy_log_info_string(self, self.non_terminated_nodes.worker_ids)
 
-        if self.update_times == 1:
-            self.update_nodes()
-
-        self.update_times = 0
         # if not self.provider.is_readonly():
         #     self.terminate_nodes_to_enforce_config_constraints(now)
 
@@ -484,6 +480,12 @@ class StandardAutoscaler:
             f"The autoscaler took {round(update_time, 3)}"
             " seconds to complete the update iteration."
         )
+
+        if self.update_times == 1:
+            self.update_nodes()
+
+        self.update_times = 0
+        
         #self.prom_metrics.update_time.observe(update_time)
 
     def terminate_nodes_to_enforce_config_constraints(self, now: float):
