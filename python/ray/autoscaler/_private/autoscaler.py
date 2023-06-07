@@ -468,6 +468,11 @@ class StandardAutoscaler:
         print("To launch %s"%(to_launch))
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
+            if self.update_times == 1:
+                self.update_nodes()
+
+            self.update_times = 0
+            
         self.worker_nums = 0
         # Execute optional end-of-update logic.
         # Keep this method call at the end of autoscaler._update().
@@ -481,11 +486,6 @@ class StandardAutoscaler:
             " seconds to complete the update iteration."
         )
 
-        if self.update_times == 1:
-            self.update_nodes()
-
-        self.update_times = 0
-        
         #self.prom_metrics.update_time.observe(update_time)
 
     def terminate_nodes_to_enforce_config_constraints(self, now: float):
