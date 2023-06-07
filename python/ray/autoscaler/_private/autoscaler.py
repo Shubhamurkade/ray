@@ -1382,7 +1382,7 @@ class StandardAutoscaler:
 
     def can_update(self, node_id):
 
-        if self.does_vm_contain_tag(node_id, "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL"):
+        if self.provider.does_vm_contain_tag(node_id, "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL"):
             print("node %s already upated no need to update again"%(node_id))
             return False
             
