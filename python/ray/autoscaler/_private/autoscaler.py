@@ -188,7 +188,7 @@ class StandardAutoscaler:
     until the cluster size that can handle the resource demand is met).
     """
     
-    worker_nums = 2
+    worker_nums = 1
     update_times = 1
     def __init__(
         self,
@@ -1376,17 +1376,23 @@ class StandardAutoscaler:
 
     def can_update(self, node_id):
         if self.disable_node_updaters:
+            print("disable_node_updaters node: %s"%(node_id))
             return False
         if node_id in self.updaters:
+            print("updaters node: %s"%(node_id))
             return False
         if not self.launch_config_ok(node_id):
+            print("launch_config_ok node: %s"%(node_id))
             return False
         if self.num_failed_updates.get(node_id, 0) > 0:  # TODO(ekl) retry?
+            print("num_failed_updates node: %s"%(node_id))
             return False
         logger.debug(
             f"{node_id} is not being updated and "
             "passes config check (can_update=True)."
         )
+
+        print("can_update return true node: %s"%(node_id))
         return True
 
     def launch_new_node(self, count: int, node_type: str) -> None:
