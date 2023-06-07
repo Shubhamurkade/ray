@@ -1370,6 +1370,7 @@ class StandardAutoscaler:
             node_resources=node_resources,
         )
         updater.start()
+        print("Updating self.updater for node %s"%(node_id))
         self.updaters[node_id] = updater
 
     def can_update(self, node_id):
