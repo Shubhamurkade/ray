@@ -1302,8 +1302,8 @@ class StandardAutoscaler:
         return docker_config
 
     def should_update(self, node_id):
-        # if not self.can_update(node_id):
-        #     return UpdateInstructions(None, None, None, None)  # no update
+        if not self.can_update(node_id):
+            return UpdateInstructions(None, None, None, None)  # no update
 
         # status = self.provider.node_tags(node_id).get(TAG_RAY_NODE_STATUS)
         # if status == STATUS_UP_TO_DATE and self.files_up_to_date(node_id):
