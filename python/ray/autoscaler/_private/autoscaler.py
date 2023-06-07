@@ -463,15 +463,16 @@ class StandardAutoscaler:
         # )
         # self._report_pending_infeasible(unfulfilled)
 
+        #if self.update_times == 1:
+        self.update_nodes()
+
+        #    self.update_times = 0
+        
         to_launch = {NODE_KIND_WORKER: self.worker_nums}
         unfulfilled = 2
         print("To launch %s"%(to_launch))
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
-            if self.update_times == 1:
-                self.update_nodes()
-
-            self.update_times = 0
             
         self.worker_nums = 0
         # Execute optional end-of-update logic.
