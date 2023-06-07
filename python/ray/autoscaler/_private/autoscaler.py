@@ -1133,6 +1133,7 @@ class StandardAutoscaler:
                 logger.exception("StandardAutoscaler: Error parsing config.")
 
     def launch_config_ok(self, node_id):
+        return False
         if self.disable_launch_config_check:
             return True
         node_tags = self.provider.node_tags(node_id)
