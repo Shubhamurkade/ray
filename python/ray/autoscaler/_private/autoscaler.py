@@ -189,6 +189,7 @@ class StandardAutoscaler:
     """
     
     worker_nums = 2
+    update_times = 1
     def __init__(
         self,
         # TODO(ekl): require config reader to be a callable always.
@@ -432,7 +433,10 @@ class StandardAutoscaler:
             logger.info(self.info_string())
         legacy_log_info_string(self, self.non_terminated_nodes.worker_ids)
 
-        self.update_nodes()
+        if self.update_times == 1:
+            self.update_nodes()
+
+        self.update_times = 0
         # if not self.provider.is_readonly():
         #     self.terminate_nodes_to_enforce_config_constraints(now)
 
