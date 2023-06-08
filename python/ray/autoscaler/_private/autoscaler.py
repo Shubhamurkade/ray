@@ -1326,11 +1326,12 @@ class StandardAutoscaler:
         #         node_id, "worker_setup_commands"
         #     )
         ray_start_commands = self.config["worker_start_ray_commands"]
+        setup_commands = self.config["setup_commands"]
 
         docker_config = self._get_node_specific_docker_config(node_id)
         return UpdateInstructions(
             node_id=node_id,
-            setup_commands=[],
+            setup_commands=setup_commands,
             ray_start_commands=ray_start_commands,
             docker_config=docker_config,
         )
