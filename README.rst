@@ -137,3 +137,15 @@ Getting Involved
 .. _`Twitter`: https://twitter.com/raydistributed
 .. _`Slack`: https://forms.gle/9TSdDYUgxYs8SA9e8
 
+Building
+--------
+
+The following steps can be followed to build Ray for vSphere support:
+  
+- Pull the source code.
+- Find out your python version with `python --version` command.
+- Install a nightly build of Ray that matches the python version from the **Daily Releases (Nightlies)** section of `Ray Installation <https://docs.ray.io/en/latest/ray-overview/installation.html>`_ page.
+- To test the changes to the Ray modules that you have modified, run the following command from the repository root: `python python/ray/setup-dev.py`: 
+  
+  - You can additionally skip the prompts for the modules that haven't been modified by using the `--skip` parameter.
+  - Most of the times, as part of vSphere support on Ray, we modify `scripts` and `autoscaler` modules.
