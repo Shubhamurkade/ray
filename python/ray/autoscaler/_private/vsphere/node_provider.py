@@ -36,7 +36,8 @@ from com.vmware.vcenter.vm_client import Power as HardPower
 from com.vmware.vapi.std_client import DynamicID
 
 from ray.autoscaler.tags import NODE_KIND_HEAD, NODE_KIND_WORKER
-
+from com.vmware.content.library_client import Item
+                                               
 logger = logging.getLogger(__name__)
 
 TAG_BATCH_DELAY = 1
@@ -329,15 +330,8 @@ class VsphereNodeProvider(NodeProvider):
 
         for i in range(count):
         
-            folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
-            folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
-            if not folder_summaries:
-                raise ValueError("Folder with name '{}' not found".
-                                format(self.foldername))
-            folder_id = folder_summaries[0].folder
-            cli_logger.print('Folder ID: {}'.format(folder_id))
-        
-            rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
+            # Find and use the resource pool defined in the manifest file.
+            rp_filter_spec = ResourcePool.FilterSpec(names=set([node_config["resource_pool"]]))
             resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
             if not resource_pool_summaries:
                 raise ValueError("Resource pool with name '{}' not found".
@@ -346,17 +340,22 @@ class VsphereNodeProvider(NodeProvider):
 
             cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
 
+            # Find and use the OVF library item defined in the manifest file.
+            find_spec = Item.FindSpec(name=node_config["library_item"])
+            item_ids = self.vsphere_client.content.library.Item.find(find_spec)
+
+            lib_item_id = item_ids[0]
+
             deployment_target = LibraryItem.DeploymentTarget(
                 resource_pool_id=resource_pool_id
             )
-
-            lib_item_id = "7534d35a-2d9c-4a4f-9ecd-0e1f4f6363ec"
             ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
                 ovf_library_item_id=lib_item_id,
                 target=deployment_target)
             cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
 
-            vm_name = "ray-node"+str(uuid.uuid4())
+            vm_name = "ray-node-"+str(uuid.uuid4())
+
             # Build the deployment spec
             deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
                 name=vm_name,
@@ -393,10 +392,12 @@ class VsphereNodeProvider(NodeProvider):
                 for error in result.error.errors:
                     cli_logger.print('OVF error: {}'.format(error.message))
                 
+                raise ValueError("OVF deployment failed for VM {}".format(vm_name))
+                
+            # Power on the VM that was created
             vm = self.get_vm(vm_name)
             status = self.vsphere_client.vcenter.vm.Power.get(vm)
             if status != HardPower.Info(state=HardPower.State.POWERED_ON):
-                cli_logger.print("Powering on VM")
                 self.vsphere_client.vcenter.vm.Power.start(vm)
                 cli_logger.print('vm.Power.start({})'.format(vm))
 
