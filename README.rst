@@ -137,6 +137,15 @@ Getting Involved
 .. _`Twitter`: https://twitter.com/raydistributed
 .. _`Slack`: https://forms.gle/9TSdDYUgxYs8SA9e8
 
+Provisioning a vSphere environment
+--------
+- Refer to the following document to setup a vSphere environment for development: `vSphere deployments`_
+- Subscribe to the `ray`_ content library. Refer to `Managing Content Library Subscriptions`_ blog for the steps.
+
+.. _`vSphere deployments`: https://confluence.eng.vmware.com/display/OCTO/vSphere+deployments#vSpheredeployments-DeployingavSphereenvironment
+.. _`ray`: https://sc2-10-185-17-50.eng.vmware.com:443/cls/vcsp/lib/5711a15b-6b1c-4eeb-8a53-c23acaf0c75c/lib.json
+.. _`Managing Content Library Subscriptions`: https://blogs.vmware.com/vsphere/2020/02/managing-content-library-subscriptions.html
+
 Building
 --------
 
@@ -150,11 +159,8 @@ The following steps can be followed to build Ray for vSphere support:
   - You can additionally skip the prompts for the modules that haven't been modified by using the ``--skip`` parameter.
   - Most of the times, as part of vSphere support on Ray, we modify `scripts`_ and `autoscaler`_ modules so a sample command would be: ``python/ray/setup-dev.py --skip rllib air tune train cloudpickle data internal tests experimental util workflow dag widgets cluster_utils.py _private dashboard -y``
 
-**PS**: The following document can be follwed to setup a vSphere environment for development: `vSphere deployments`_
-
 .. _`scripts`: python/ray/scripts
 .. _`autoscaler`: python/ray/autoscaler
-.. _`vSphere deployments`: https://confluence.eng.vmware.com/display/OCTO/vSphere+deployments#vSpheredeployments-DeployingavSphereenvironment
 
 Deploying Ray on vSphere
 --------
