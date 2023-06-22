@@ -24,16 +24,15 @@ provider:
     type: vsphere
 
     vsphere_config:
-      admin_user: administrator@vsphere.local
-      admin_password: ITBF-qivk3u-1FuA
-      server: 10.185.17.50
-      datacenter: WCP-DC
-      folder: Discovered virtual machine
-      datastore: vsanDatastore
+      admin_user: <username>
+      admin_password: <password>
+      server: <server-ip>
+      datacenter: <datacenter>
+      datastore: <vsan-datastore>
 
 # How Ray will authenticate with newly launched nodes.
 auth:
-    ssh_user: root
+    ssh_user: ray
 # By default Ray creates a new private keypair, but you can also use your own.
 # If you do so, make sure to also set "KeyName" in the head and worker node
 # configurations below.
@@ -101,6 +100,7 @@ setup_commands:
         (stat $HOME/anaconda3/envs/tensorflow2_p38/ &> /dev/null &&
         echo 'export PATH="$HOME/anaconda3/envs/tensorflow2_p38/bin:$PATH"' >> ~/.bashrc) || true
     - which ray || pip install -U "ray[default] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp38-cp38-manylinux2014_x86_64.whl"
+    - pip install grpcio==1.51.0
 
 # Custom commands that will be run on the head node after common setup.
 head_setup_commands:
