@@ -25,11 +25,18 @@ import requests
 from com.vmware.vcenter_client import ResourcePool, Folder
 from com.vmware.vcenter.ovf_client import LibraryItem
 import uuid
+import yaml
+import os
 from com.vmware.vcenter_client import VM
 from com.vmware.vcenter.vm_client import Power as HardPower
 from com.vmware.vapi.std_client import DynamicID
+from com.vmware.content.library_client import Item
+from com.vmware.vcenter.guest_client import CustomizationSpec,\
+    CloudConfiguration, CloudinitConfiguration, ConfigurationSpec,\
+    GlobalDNSSettings
+from ray.autoscaler._private.vsphere.config import bootstrap_vsphere
+from ray.autoscaler._private.vsphere.config import (PUBLIC_KEY_PATH, USER_DATA_FILE_PATH)
 import com.vmware.vapi.std.errors_client as ErrorClients
-
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +73,6 @@ def get_unverified_session():
     requests.packages.urllib3.disable_warnings()
     return session
 
-@staticmethod
-def bootstrap_config(cluster_config):
-    return cluster_config
-    
-def make_vsphere_vm():
-    pass
-
-
 class VsphereNodeProvider(NodeProvider):
     max_terminate_nodes = 1000
 
@@ -94,11 +93,16 @@ class VsphereNodeProvider(NodeProvider):
         self.tag_cache = {}
         # Tags that we will soon upload.
         self.tag_cache_pending = defaultdict(dict)
+        self.tag_cache_lock = threading.Lock()
         self.lock = RLock()
 
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes : Dict[str, VM] = {}
+
+    @staticmethod
+    def bootstrap_config(cluster_config):
+        return bootstrap_vsphere(cluster_config)
 
     def non_terminated_nodes(self, tag_filters):
         with self.lock:
@@ -115,8 +119,8 @@ class VsphereNodeProvider(NodeProvider):
                 vm_id = vm.vm
                 yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm.vm)
                 
-                tags = {}
-                matched_tags = 0
+                matched_tags = {}
+                all_tags = {}
                 # If the VM has a tag from tag_filter then select it 
                 for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
                     vsphere_vm_tag = self.vsphere_client.tagging.Tag.get(tag_id=tag_id).name 
@@ -125,11 +129,14 @@ class VsphereNodeProvider(NodeProvider):
                         tag_key = tag_key_value[0]
                         tag_value = tag_key_value[1]
                         if tag_key in filters and tag_value == filters[tag_key]:
-                            matched_tags += 1
-                            tags[tag_key] = tag_value
+                            matched_tags[tag_key] = tag_value
                         
-                if matched_tags == len(filters):
-                    self.tag_cache[vm_id] = tags
+                        all_tags[tag_key] = tag_value   
+
+                # Update the tag cache with latest tags
+                self.tag_cache[vm_id] = all_tags
+
+                if len(matched_tags) == len(filters):
                     # refresh cached_nodes with latest information e.g external ip 
                     if vm_id in self.cached_nodes:
                         del self.cached_nodes[vm_id]
@@ -153,20 +160,15 @@ class VsphereNodeProvider(NodeProvider):
             return dict(d1)
 
     def external_ip(self, node_id):
-        # node_id and vm_name are same for vsphere
-        vm = self.get_vm(self.vsphere_client, node_id)
-
         # Return the external IP of the VM
-        cli_logger.info("External ip vm %s"%(vm))
-        vm = self.vsphere_client.vcenter.vm.guest.Identity.get(vm.vm)
+        vm = self.vsphere_client.vcenter.vm.guest.Identity.get(node_id)
 
         return vm.ip_address
 
     def internal_ip(self, node_id):
-        if node.private_ip_address is None:
-            node = self._get_node(node_id)
-
-        return node.private_ip_address
+        # TODO: Currently vSphere VMs do not show an internal IP. Check IP configuration
+        # to get internal IP too. Temporary fix is to just work with external IPs
+        return self.external_ip(node_id)
 
     def set_node_tags(self, node_id, tags):
         # This method gets called from the Ray and it passes
@@ -258,8 +260,9 @@ class VsphereNodeProvider(NodeProvider):
                     "under `provider` in the cluster configuration.",
                     cli_logger.render_list(reuse_node_ids),
                 )
-                self.vsphere_client.vcenter.vm.Power.start(reuse_nodes)
                 for node_id in reuse_node_ids:
+                    cli_logger.info("Powering on VM")
+                    self.vsphere_client.vcenter.vm.Power.start(node_id)
                     self.set_node_tags(node_id, tags)
                 counter -= len(reuse_node_ids)
 
@@ -304,13 +307,13 @@ class VsphereNodeProvider(NodeProvider):
             else:
                 tag_specs += [user_tag_spec]
 
-    def get_vm(self, client, vm_name):
+    def get_vm(self, node_id):
         """
-        Return the identifier of a vm
+        Return the VM summary object
         Note: The method assumes that there is only one vm with the mentioned name.
         """
-        vm = self._get_cached_node(vm_name)
-        cli_logger.info(f'VM {vm_name} found')
+        vm = self._get_cached_node(node_id)
+        cli_logger.info(f'VM {node_id} found')
         
         return vm
 
@@ -323,77 +326,184 @@ class VsphereNodeProvider(NodeProvider):
         except Exception as e:
             print("Check that the tag is associable to {}".format(inv_type))
             raise e
+    
+    def set_cloudinit_userdata(self, vm_id):
+        logger.info("Setting cloudinit userdata for vm {}".format(vm_id))
+
+        metadata = '{"cloud_name": "vSphere"}'
+
+        # Read the public key that was generated previously.
+        with open(PUBLIC_KEY_PATH, 'r') as file:
+            public_key = file.read().rstrip('\n')
+
+        # This file contains the userdata with default values.
+        # We want to add the key that we generate with create_key_pair 
+        # function into authorized_keys section
+
+        f = open(USER_DATA_FILE_PATH, "r")
+        data = yaml.load(f, Loader=yaml.FullLoader)
+        for _, v in data.items():
+            for user in v:
+                if isinstance(user, dict):
+                    user["ssh_authorized_keys"] = [public_key]
+        f.close()
+
+        modified_userdata = yaml.dump(data, default_flow_style=False)
+
+        # The userdata needs to be prefixed with #cloud-config.
+        # Without it, the cloudinit spec would get applied but
+        # it wouldn't add the userdata on the VM.
+
+        modified_userdata = "#cloud-config\n"+modified_userdata
+        logger.info("Successfully modified the userdata file for vm {}".format(vm_id))
+
+        ############# Create cloud-init spec and apply ####################
+        cloudinit_config = CloudinitConfiguration(metadata=metadata,
+                                            userdata=modified_userdata)
+        cloud_config = CloudConfiguration(cloudinit=cloudinit_config,
+                            type=CloudConfiguration.Type('CLOUDINIT'))
+        config_spec = ConfigurationSpec(cloud_config=cloud_config)
+        global_dns_settings = GlobalDNSSettings()
+        adapter_mapping_list = []
+        customization_spec = CustomizationSpec(configuration_spec=config_spec,
+                            global_dns_settings=global_dns_settings,
+                            interfaces=adapter_mapping_list)
+        
+        # create customization specification by CustomizationSpecs service
+        specs_svc = self.vsphere_client.vcenter.guest.CustomizationSpecs
+        spec_name = str(uuid.uuid4())
+        spec_desc = 'This is a customization specification which includes'\
+                'raw cloud-init configuration data'
+        create_spec = specs_svc.CreateSpec(name=spec_name,
+                                        description=spec_desc,
+                                        spec=customization_spec)
+        specs_svc.create(spec=create_spec)
+
+        vmcust_svc = self.vsphere_client.vcenter.vm.guest.Customization
+        set_spec = vmcust_svc.SetSpec(name=spec_name, spec=None)
+        vmcust_svc.set(vm=vm_id, spec=set_spec)
+
+        logger.info("Successfully added cloudinit config for vm {}".format(vm_id))
+        #####################################################################
+
+    def create_instant_clone_node(self, vm_clone_from, vm_name_target):
+        vm_clone_from_id = vm_clone_from.vm
+        clone_spec = VM.InstantCloneSpec(source=vm_clone_from_id, name=vm_name_target)
+        vm_id = self.vsphere_client.vcenter.VM.instant_clone(clone_spec)
+
+        # Restarting the VM gets a new IP for the VM.
+        # TODO: Find a better way to get a new IP without restarting.
+        self.vsphere_client.vcenter.vm.Power.stop(vm_id)
+        vm = self.get_vm(vm_id)
+
+        return vm
+
+    def create_ovf_node(self, node_config, vm_name_target):
+
+        # Find and use the resource pool defined in the manifest file.
+        rp_filter_spec = ResourcePool.FilterSpec(names=set([node_config["resource_pool"]]))
+        resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
+        if not resource_pool_summaries:
+            raise ValueError("Resource pool with name '{}' not found".
+                            format(self.resourcepoolname))
+        
+        resource_pool_id = resource_pool_summaries[0].resource_pool
+
+        cli_logger.print('Resource pool ID: {}'.format(resource_pool_id))
+
+        # Find and use the OVF library item defined in the manifest file.
+        find_spec = Item.FindSpec(name=node_config["library_item"])
+        item_ids = self.vsphere_client.content.library.Item.find(find_spec)
+
+        lib_item_id = item_ids[0]
+
+        deployment_target = LibraryItem.DeploymentTarget(
+            resource_pool_id=resource_pool_id
+        )
+        ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
+            ovf_library_item_id=lib_item_id,
+            target=deployment_target)
+        cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
+
+        # Build the deployment spec
+        deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
+            name=vm_name_target,
+            annotation=ovf_summary.annotation,
+            accept_all_eula=True,
+            network_mappings=None,
+            storage_mappings=None,
+            storage_provisioning=None,
+            storage_profile_id=None,
+            locale=None,
+            flags=None,
+            additional_parameters=None,
+            default_datastore_id=None)
+
+        # Deploy the ovf template
+        result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
+            lib_item_id,
+            deployment_target,
+            deployment_spec,
+            client_token=str(uuid.uuid4()))
+
+        # The type and ID of the target deployment is available in the deployment result.
+        if result.succeeded:
+            cli_logger.print('Deployment successful. VM Name: "{}", ID: "{}"'
+                .format(vm_name_target, result.resource_id.id))
+            self.vm_id = result.resource_id.id
+            error = result.error
+            if error is not None:
+                for warning in error.warnings:
+                    cli_logger.print('OVF warning: {}'.format(warning.message))
+
+        else:
+            cli_logger.print('Deployment failed.')
+            for error in result.error.errors:
+                cli_logger.print('OVF error: {}'.format(error.message))
+            
+            raise ValueError("OVF deployment failed for VM {}".format(vm_name_target))
+        
+        # Get the created vm object
+        vm = self.get_vm(result.resource_id.id)
+
+        # Inject a new user with public key into the VM
+        self.set_cloudinit_userdata(vm.vm)
+
+        return vm
         
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
-        for i in range(count):
-            folder_filter_spec = Folder.FilterSpec(names=set(["folder-WCP_DC"]))
-            folder_summaries = self.vsphere_client.vcenter.Folder.list(folder_filter_spec)
-            if not folder_summaries:
-                raise ValueError("Folder with name '{}' not found".
-                                format(self.foldername))
-            folder_id = folder_summaries[0].folder
-            cli_logger.info('Folder ID: {}'.format(folder_id))
-        
-            rp_filter_spec = ResourcePool.FilterSpec(names=set(["ray"]))
-            resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
-            if not resource_pool_summaries:
-                raise ValueError("Resource pool with name '{}' not found".
-                                format(self.resourcepoolname))
-            resource_pool_id = resource_pool_summaries[0].resource_pool
+        for _ in range(count):
 
-            cli_logger.info('Resource pool ID: {}'.format(resource_pool_id))
+            # The nodes are named as follows:
+            # ray-<cluster-name>-head-<uuid> for the head node
+            # ray-<cluster-name>-worker-<uuid> for the worker nodes
+            vm_name = tags[TAG_RAY_NODE_NAME]+"-"+str(uuid.uuid4())
 
-            deployment_target = LibraryItem.DeploymentTarget(
-                resource_pool_id=resource_pool_id
-            )
-            # TODO: How to get this id?
-            lib_item_id = "7534d35a-2d9c-4a4f-9ecd-0e1f4f6363ec"
-            ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
-                ovf_library_item_id=lib_item_id,
-                target=deployment_target)
-            cli_logger.info('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
+            vm = None
 
-            vm_name = "ray-node-pandora-"+str(uuid.uuid4())
-            # Build the deployment spec
-            deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
-                name=vm_name,
-                annotation=ovf_summary.annotation,
-                accept_all_eula=True,
-                network_mappings=None,
-                storage_mappings=None,
-                storage_provisioning=None,
-                storage_profile_id=None,
-                locale=None,
-                flags=None,
-                additional_parameters=None,
-                default_datastore_id=None)
+            # Check if clone_from config is present and that it contains a valid VM
+            try:
+                vm = self.get_vm(node_config["clone_from"]) 
+            except KeyError:
+                cli_logger.info("clone_from config not present so creating VM from OVF.")
 
-            # Deploy the ovf template
-            result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
-                lib_item_id,
-                deployment_target,
-                deployment_spec,
-                client_token=str(uuid.uuid4()))
+            # Clone from existing worker if we got a valid VM from clone_from config.
+            if "clone" in node_config and node_config["clone"] is True and vm != None:
 
-            # The type and ID of the target deployment is available in the deployment result.
-            if result.succeeded:
-                cli_logger.info('Deployment successful. VM Name: "{}", ID: "{}"'
-                    .format(vm_name, result.resource_id.id))
-                self.vm_id = result.resource_id.id
-                error = result.error
-                if error is not None:
-                    for warning in error.warnings:
-                        cli_logger.info('OVF warning: {}'.format(warning.message))
+                cli_logger.info("Clone the worker from {}".format(vm))
 
-            else:
-                cli_logger.info('Deployment failed.')
-                for error in result.error.errors:
-                    cli_logger.abort('OVF error: {}'.format(error.message))
+                vm = self.create_instant_clone_node(vm, vm_name)
+            else: 
                 
-            vm = self.get_vm(self.vsphere_client, vm_name)
+                vm = self.create_ovf_node(node_config, vm_name)
+
+                node_config["clone_from"] = vm.vm
+
             vm_id = vm.vm
+            # Power on the created VM. If it was InstantClone then we would have
+            # powered it off after creation.
             status = self.vsphere_client.vcenter.vm.Power.get(vm_id)
             if status != HardPower.Info(state=HardPower.State.POWERED_ON):
                 cli_logger.info("Powering on VM")
@@ -528,10 +638,7 @@ class VsphereNodeProvider(NodeProvider):
         """Refresh and get info for this node, updating the cache."""
         self.non_terminated_nodes({})  # Side effect: updates cache
 
-        if node_id in self.cached_nodes:
-            return self.cached_nodes[node_id]
-
-        vms  = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(names= set([node_id])))
+        vms  = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(vms=set([node_id])))
         if len(vms) == 0:
             print("VM with name ({}) not found".format(node_id))
             return None

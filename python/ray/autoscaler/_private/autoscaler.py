@@ -123,7 +123,7 @@ class NonTerminatedNodes:
     def __init__(self, provider: NodeProvider):
         start_time = time.time()
         # All non-terminated nodes
-        self.all_node_ids = provider.non_terminated_nodes([])
+        self.all_node_ids = provider.non_terminated_nodes({})
 
         print("all nodes %s"%(self.all_node_ids))
         # Managed worker nodes (node kind "worker"):
@@ -132,7 +132,7 @@ class NonTerminatedNodes:
         self.head_id: Optional[NodeID] = None
 
         for node in self.all_node_ids:
-            node_kind = provider.node_tags(node)
+            node_kind = provider.node_tags(node)[TAG_RAY_NODE_KIND]
             if node_kind == NODE_KIND_WORKER:
                 self.worker_ids.append(node)
             elif node_kind == NODE_KIND_HEAD:

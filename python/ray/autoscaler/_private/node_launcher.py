@@ -102,7 +102,7 @@ class BaseNodeLauncher:
         full_exception = None
         try:
             self.provider.create_node_with_resources(
-                node_config, ["ray-worker"], count, resources
+                node_config, node_tags, count, resources
             )
         except NodeLaunchException as node_launch_exception:
             self.node_provider_availability_tracker.update_node_availability(

@@ -180,6 +180,7 @@ _PROVIDER_PRETTY_NAMES = {
     "kuberay": "Kuberay",
     "aliyun": "Aliyun",
     "external": "External",
+    "vsphere": "vSphere"
 }
 
 _DEFAULT_CONFIGS = {
