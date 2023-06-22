@@ -436,7 +436,7 @@ def teardown_cluster(
     provider = _get_node_provider(config["provider"], config["cluster_name"])
 
     def remaining_nodes():
-        workers = provider.non_terminated_nodes(["ray-worker"])
+        workers = provider.non_terminated_nodes({TAG_RAY_NODE_KIND: NODE_KIND_WORKER})
 
         if keep_min_workers:
             min_workers = config.get("min_workers", 0)
@@ -458,7 +458,7 @@ def teardown_cluster(
 
             return workers
 
-        head = provider.non_terminated_nodes(["ray-head"])
+        head = provider.non_terminated_nodes({TAG_RAY_NODE_KIND: NODE_KIND_HEAD})
 
         return head + workers
 
@@ -541,7 +541,7 @@ def kill_node(
     cli_logger.confirm(yes, "A random node will be killed.")
 
     provider = _get_node_provider(config["provider"], config["cluster_name"])
-    nodes = provider.non_terminated_nodes(["ray-worker"])
+    nodes = provider.non_terminated_nodes({TAG_RAY_NODE_KIND: NODE_KIND_WORKER})
     if not nodes:
         cli_logger.print("No worker nodes detected.")
         return None
@@ -644,7 +644,7 @@ def get_or_create_head_node(
     head_node_tags = {
         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
     }
-    nodes = provider.non_terminated_nodes(["ray-head"])
+    nodes = provider.non_terminated_nodes(head_node_tags)
     cli_logger.print("Nodes %s"%(nodes))
     if len(nodes) > 0:
         head_node = nodes[0]
@@ -721,12 +721,12 @@ def get_or_create_head_node(
                 provider.terminate_node(head_node)
                 cli_logger.print("Terminated head node {}", head_node)
 
-            # head_node_tags[TAG_RAY_LAUNCH_CONFIG] = launch_hash
-            # head_node_tags[TAG_RAY_NODE_NAME] = "ray-{}-head".format(
-            #     config["cluster_name"]
-            # )
-            # head_node_tags[TAG_RAY_NODE_STATUS] = STATUS_UNINITIALIZED
-            provider.create_node(head_node_config, ["ray-head"], 1)
+            head_node_tags[TAG_RAY_LAUNCH_CONFIG] = launch_hash
+            head_node_tags[TAG_RAY_NODE_NAME] = "ray-{}-head".format(
+                config["cluster_name"]
+            )
+            head_node_tags[TAG_RAY_NODE_STATUS] = STATUS_UNINITIALIZED
+            provider.create_node(head_node_config, head_node_tags, 1)
             cli_logger.print("Launched a new head node")
 
             start = time.time()
@@ -737,7 +737,7 @@ def get_or_create_head_node(
                         cli_logger.abort(
                             "Head node fetch timed out. Failed to create head node."
                         )
-                    nodes = provider.non_terminated_nodes(["ray-head"])
+                    nodes = provider.non_terminated_nodes(head_node_tags)
                     if len(nodes) == 1:
                         head_node = nodes[0]
                         break
@@ -815,7 +815,7 @@ def get_or_create_head_node(
         updater.join()
 
         # Refresh the node cache so we see the external ip if available
-        provider.non_terminated_nodes(["ray-head"])
+        provider.non_terminated_nodes(head_node_tags)
 
         if updater.exitcode != 0:
             # todo: this does not follow the mockup and is not good enough
@@ -1322,7 +1322,7 @@ def get_worker_node_ips(
         config["cluster_name"] = override_cluster_name
 
     provider = _get_node_provider(config["provider"], config["cluster_name"])
-    nodes = provider.non_terminated_nodes(["ray-worker"])
+    nodes = provider.non_terminated_nodes({TAG_RAY_NODE_KIND: NODE_KIND_WORKER})
 
     if config.get("provider", {}).get("use_internal_ips", False) is True:
         return [provider.internal_ip(node) for node in nodes]
@@ -1339,7 +1339,7 @@ def _get_worker_nodes(
         config["cluster_name"] = override_cluster_name
 
     provider = _get_node_provider(config["provider"], config["cluster_name"])
-    return provider.non_terminated_nodes(["ray-worker"])
+    return provider.non_terminated_nodes({TAG_RAY_NODE_KIND: NODE_KIND_WORKER})
 
 
 def _get_running_head_node(
@@ -1369,7 +1369,7 @@ def _get_running_head_node(
     head_node_tags = {
         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
     }
-    nodes = provider.non_terminated_nodes(["ray-head"])
+    nodes = provider.non_terminated_nodes(head_node_tags)
 
     return nodes[0]
     head_node = None
