@@ -36,6 +36,7 @@ from com.vmware.vcenter.guest_client import CustomizationSpec,\
     GlobalDNSSettings
 from ray.autoscaler._private.vsphere.config import bootstrap_vsphere
 from ray.autoscaler._private.vsphere.config import (PUBLIC_KEY_PATH, USER_DATA_FILE_PATH)
+from com.vmware.cis.tagging_client import CategoryModel
 import com.vmware.vapi.std.errors_client as ErrorClients
 
 logger = logging.getLogger(__name__)
@@ -171,6 +172,8 @@ class VsphereNodeProvider(NodeProvider):
         return self.external_ip(node_id)
 
     def set_node_tags(self, node_id, tags):
+
+        cli_logger.info("Setting tags for vm {}".format(node_id))
         # This method gets called from the Ray and it passes
         # node_id which needs to be vm.vm and not vm.name
         with self.lock:
@@ -179,6 +182,10 @@ class VsphereNodeProvider(NodeProvider):
                 category_id = self.create_category()
 
             for key, value in tags.items():
+                # If a tag with a key is present on the VM, then remove it
+                # before updating the key with a new value.
+                self.remove_tag_from_vm(key, node_id)
+
                 tag = key+':'+value
                 tag_id = self.get_tag(tag, category_id )
                 if not tag_id:
@@ -233,7 +240,10 @@ class VsphereNodeProvider(NodeProvider):
            
             # Select POWERED_OFF or SUSENDED vms which has ray-node-type,
             # ray-launch-config, ray-user-node-type tags
-            for vm in vms and number_of_reused_nodes < counter:
+            for vm in vms:
+                if number_of_reused_nodes >= counter:
+                    break
+                
                 vm_id = vm.name
                 yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm.vm)
                 filter_matched_count = 0
@@ -263,7 +273,6 @@ class VsphereNodeProvider(NodeProvider):
                 for node_id in reuse_node_ids:
                     cli_logger.info("Powering on VM")
                     self.vsphere_client.vcenter.vm.Power.start(node_id)
-                    self.set_node_tags(node_id, tags)
                 counter -= len(reuse_node_ids)
 
         created_nodes_dict = {}
@@ -272,6 +281,11 @@ class VsphereNodeProvider(NodeProvider):
 
         all_created_nodes = reused_nodes_dict
         all_created_nodes.update(created_nodes_dict)
+
+        # Set tags on the nodes that were created/reused
+        for _, vm in all_created_nodes.items():
+            self.set_node_tags(vm.vm, filters)
+
         return all_created_nodes        
 
     @staticmethod
@@ -317,14 +331,14 @@ class VsphereNodeProvider(NodeProvider):
         
         return vm
 
-    def attach_tag(self, inv_obj, inv_type, tag_id):
-        dyn_id = DynamicID(type=inv_type, id=inv_obj)
+    def attach_tag(self, vm_id, resource_type, tag_id):
+        dyn_id = DynamicID(type=resource_type, id=vm_id)
         try:
-            cli_logger.info(f'Attaching tag {tag_id} to {inv_obj}')
+            cli_logger.info(f'Attaching tag {tag_id} to {vm_id}')
             self.vsphere_client.tagging.TagAssociation.attach(tag_id, dyn_id)
             cli_logger.info('Tag attached')
         except Exception as e:
-            print("Check that the tag is associable to {}".format(inv_type))
+            print("Check that the tag is associable to {}".format(resource_type))
             raise e
     
     def set_cloudinit_userdata(self, vm_id):
@@ -405,7 +419,7 @@ class VsphereNodeProvider(NodeProvider):
         resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
         if not resource_pool_summaries:
             raise ValueError("Resource pool with name '{}' not found".
-                            format(self.resourcepoolname))
+                            format(rp_filter_spec))
         
         resource_pool_id = resource_pool_summaries[0].resource_pool
 
@@ -470,7 +484,26 @@ class VsphereNodeProvider(NodeProvider):
         self.set_cloudinit_userdata(vm.vm)
 
         return vm
-        
+
+    # Example: If a tag called node-status:initializing is present on the VM.
+    # If we would like to add a new value called finished with the node-status key.
+    # We'll need to delete the older tag node-status:initializing first before creating
+    # node-status:finished
+    def remove_tag_from_vm(self, tag_key_to_remove, vm_id):
+        yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm_id)
+
+        # List all the tags present on the VM.
+        for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
+            vsphere_vm_tag = self.vsphere_client.tagging.Tag.get(tag_id=tag_id).name 
+            if ':' in vsphere_vm_tag:
+                tag_key_value = vsphere_vm_tag.split(':')
+                tag_key = tag_key_value[0]
+                if tag_key == tag_key_to_remove:
+                    # Remove the tag matching the key passed.
+                    cli_logger.info("Removing tag {} from the VM {}".format(tag_key, vm_id))
+                    self.vsphere_client.tagging.TagAssociation.detach(tag_id, yn_id)
+                    break
+
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
@@ -516,13 +549,6 @@ class VsphereNodeProvider(NodeProvider):
             category_id = self.get_category()
             if not category_id:
                 category_id = self.create_category()
-            for key, value in tags.items():
-                tag = key+':'+value
-                tag_id = self.get_tag(tag, category_id )
-                if not tag_id:
-                    tag_id = self.create_node_tag(tag, category_id)
-                self.attach_tag(vm_id, TYPE_OF_RESOURCE, tag_id=tag_id)
-                cli_logger.info(f'Tag {tag} attached to VM {vm_name}')
             
             created_nodes_dict[vm_name] = vm
         
@@ -558,81 +584,41 @@ class VsphereNodeProvider(NodeProvider):
         cli_logger.info(f'Creating {NODE_CATEGORY} category')
         category_spec = self.vsphere_client.tagging.Category.CreateSpec(name=NODE_CATEGORY, 
                                        description="Identifies Ray head node and worker nodes", 
-                                       cardinality=self.vsphere_client.tagging.CategoryModel.Cardinality.MULTIPLE,
-                                       associable_types=TYPE_OF_RESOURCE)
+                                       cardinality=CategoryModel.Cardinality.MULTIPLE,
+                                       associable_types=set())
+        category_id = None
+
         try:
             category_id = self.vsphere_client.tagging.Category.create(category_spec)
         except ErrorClients.Unauthorized as e:
             cli_logger.abort(f'Unathorised to create the category. Exception: {e.messages}')
         except Exception as e:
-            cli_logger.abort(e.messages)
+            cli_logger.abort(e)
+
         cli_logger.info(f'Category {category_id} created')
+        
         return category_id
 
-    def terminate_node(self, vm_id):
-        vm = self._get_cached_node(vm_id)
-        cli_logger.info(f'terminating node {vm.vm}')
-        if vm:
-            self.vsphere_client.vcenter.vm.Power.stop(vm.vm)
+    def terminate_node(self, node_id):
+        if node_id is None:
+            return
+        
+        status = self.vsphere_client.vcenter.vm.Power.get(node_id)
+        if status != HardPower.Info(state=HardPower.State.POWERED_OFF):
+            self.vsphere_client.vcenter.vm.Power.stop(node_id)
+            cli_logger.info('vm.Power.stop({})'.format(node_id))
+            
+        self.vsphere_client.vcenter.VM.delete(node_id)
+        cli_logger.info("Deleted vm {}".format(node_id))
+        self.cached_nodes.pop(node_id)
+        self.tag_cache.pop(node_id)
 
     def terminate_nodes(self, node_ids):
         if not node_ids:
             return
 
-        terminate_instances_func = self.ec2.meta.client.terminate_instances
-        stop_instances_func = self.ec2.meta.client.stop_instances
-
-        # In some cases, this function stops some nodes, but terminates others.
-        # Each of these requires a different EC2 API call. So, we use the
-        # "nodes_to_terminate" dict below to keep track of exactly which API
-        # call will be used to stop/terminate which set of nodes. The key is
-        # the function to use, and the value is the list of nodes to terminate
-        # with that function.
-        nodes_to_terminate = {terminate_instances_func: [], stop_instances_func: []}
-
-        if self.cache_stopped_nodes:
-            spot_ids = []
-            on_demand_ids = []
-
-            for node_id in node_ids:
-                if self._get_cached_node(node_id).spot_instance_request_id:
-                    spotð_ids += [node_id]
-                else:
-                    on_demand_ids += [node_id]
-
-            if on_demand_ids:
-                # todo: show node names?
-                cli_logger.info(
-                    "Stopping instances {} "
-                    + cf.dimmed(
-                        "(to terminate instead, "
-                        "set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration)"
-                    ),
-                    cli_logger.render_list(on_demand_ids),
-                )
-
-            if spot_ids:
-                cli_logger.info(
-                    "Terminating instances {} "
-                    + cf.dimmed("(cannot stop spot instances, only terminate)"),
-                    cli_logger.render_list(spot_ids),
-                )
-
-            nodes_to_terminate[stop_instances_func] = on_demand_ids
-            nodes_to_terminate[terminate_instances_func] = spot_ids
-        else:
-            nodes_to_terminate[terminate_instances_func] = node_ids
-
-        max_terminate_nodes = (
-            self.max_terminate_nodes
-            if self.max_terminate_nodes is not None
-            else len(node_ids)
-        )
-
-        for terminate_func, nodes in nodes_to_terminate.items():
-            for start in range(0, len(nodes), max_terminate_nodes):
-                terminate_func(InstanceIds=nodes[start : start + max_terminate_nodes])
+        for node_id in node_ids:
+            self.terminate_node(node_id)
 
     def _get_node(self, node_id):
         """Refresh and get info for this node, updating the cache."""
