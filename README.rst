@@ -141,10 +141,12 @@ Provisioning a vSphere environment
 --------
 - Refer to the following document to setup a vSphere environment for development: `vSphere deployments`_
 - Subscribe to the `ray`_ content library. Refer to `Managing Content Library Subscriptions`_ blog for the steps.
+- Create a Resource Pool with name ``ray`` on the vSphere environment. Refer to the following doc: `Create a Resource Pool`_ 
 
 .. _`vSphere deployments`: https://confluence.eng.vmware.com/display/OCTO/vSphere+deployments#vSpheredeployments-DeployingavSphereenvironment
 .. _`ray`: https://sc2-10-185-17-50.eng.vmware.com:443/cls/vcsp/lib/5711a15b-6b1c-4eeb-8a53-c23acaf0c75c/lib.json
 .. _`Managing Content Library Subscriptions`: https://blogs.vmware.com/vsphere/2020/02/managing-content-library-subscriptions.html
+.. _`Create a Resource Pool`: https://docs.vmware.com/en/VMware-vSphere/7.0/com.vmware.vsphere.resmgmt.doc/GUID-0F6C6709-A5DA-4D38-BE08-6CB1002DD13D.html
 
 Building
 --------
