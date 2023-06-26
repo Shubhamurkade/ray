@@ -154,6 +154,7 @@ Building
 The following steps can be followed to build Ray for vSphere support:
   
 - Pull the source code.
+- Checkout the branch you are working on: ``git checkout <branch-name>``
 - Find out your python version with ``python --version`` command.
 - Install a nightly build of Ray that matches the python version from the **Daily Releases (Nightlies)** section of `Ray Installation <https://docs.ray.io/en/latest/ray-overview/installation.html>`_ page.
 - To test the changes to the Ray modules that you have modified, run the following command from the repository root: ``python python/ray/setup-dev.py``: 
@@ -167,6 +168,7 @@ The following steps can be followed to build Ray for vSphere support:
 Deploying Ray on vSphere
 --------
 - Create an input manifest file taking the following sample file as a reference. `Sample input manifest`_
+- Add the following command in ``setup_commands`` section to checkout your dev branch on the head node: ``git -C ./ray checkout <branch-name>``
 - Run ``ray up <manifest-file>`` command.
 
 .. _`Sample input manifest`: https://confluence.eng.vmware.com/pages/viewpage.action?pageId=1717515586&preview=/1717515586/1717515750/vsphere.yaml
