@@ -399,7 +399,6 @@ class Monitor:
                     self.autoscaler.update()
                     status["autoscaler_update_time"] = time.time() - update_start_time
                     autoscaler_summary = self.autoscaler.summary()
-                    print("Autoscaler summary: {}".format(autoscaler_summary))
                     self.emit_metrics(
                         load_metrics_summary,
                         autoscaler_summary,

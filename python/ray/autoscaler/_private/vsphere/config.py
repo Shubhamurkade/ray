@@ -25,6 +25,9 @@ def bootstrap_vsphere(config):
     # create a copy of the input config to modify
     config = copy.deepcopy(config)
 
+    # Update library item configs
+    update_library_item_configs(config)
+
     # Log warnings if user included deprecated `head_node` or `worker_nodes`
     # fields. Raise error if no `available_node_types`
     check_legacy_fields(config)
@@ -41,6 +44,38 @@ def bootstrap_vsphere(config):
     )
 
     return config
+
+# Worker node_config:
+#   If clone:False or unspecified:
+#       If library_item specified:
+#           Create worker from the library_item
+#       If library_item unspecified
+#           Create worker from head node's library_item
+#   If clone:True 
+#       If library_item unspecified:
+#           Terminate
+#       If library_item specified:
+#           A frozen VM is created from the library item
+#           Remaining workers are created from the created frozen VM
+def update_library_item_configs(config):
+    available_node_types = config["available_node_types"]
+    worker_node_config = available_node_types["worker"]["node_config"]
+
+    if "clone" in worker_node_config and worker_node_config["clone"] == True:
+        if "library_item" not in worker_node_config:
+            raise ValueError("library_item is mandatory if clone:True is set for worker config")
+
+        freeze_vm_library_item = worker_node_config["library_item"]
+        for node_type in available_node_types:
+            if "head" in node_type:
+                available_node_types[node_type]["node_config"]["freeze_vm_library_item"] = freeze_vm_library_item
+                break
+    elif "clone" not in worker_node_config or worker_node_config["clone"] == False:
+        if "library_item" not in worker_node_config:
+            for node_type in available_node_types:
+                if "head" in node_type:
+                    worker_node_config["library_item"] = available_node_types[node_type]["node_config"]["library_item"]
+                    break
 
 def create_key_pair():
     

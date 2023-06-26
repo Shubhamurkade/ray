@@ -18,7 +18,7 @@ from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_KIND,
     TAG_RAY_NODE_NAME,
-    TAG_RAY_USER_NODE_TYPE,
+    NODE_KIND_WORKER,
 )
 from vmware.vapi.vsphere.client import create_vsphere_client
 import requests
@@ -34,16 +34,27 @@ from com.vmware.content.library_client import Item
 from com.vmware.vcenter.guest_client import CustomizationSpec,\
     CloudConfiguration, CloudinitConfiguration, ConfigurationSpec,\
     GlobalDNSSettings
+from ray.autoscaler._private.vsphere.utils import VmwSdkClient
 from ray.autoscaler._private.vsphere.config import bootstrap_vsphere
 from ray.autoscaler._private.vsphere.config import (PUBLIC_KEY_PATH, USER_DATA_FILE_PATH)
 from com.vmware.cis.tagging_client import CategoryModel
 import com.vmware.vapi.std.errors_client as ErrorClients
+from pyVmomi import vim
+from pyVim.task import WaitForTask
 
 logger = logging.getLogger(__name__)
 
 TAG_BATCH_DELAY = 1
 TYPE_OF_RESOURCE = "VirtualMachine"
 NODE_CATEGORY = "ray"
+TAG_CLONE_FROM="ray-clone-from"
+
+# TODO: Dynamically generate frozen VM name. 
+# Reason: There can be multiple ray clusters on vSphere. Each cluster should have it's unique name for
+# frozen VM.
+# Impediment to implement now: The name of frozen VM should be unqiue across all the Ray clusters present 
+# on vSphere and should somehow be passed from the bootstrap machine to the head node.
+FROZEN_VM_NAME = "ray-frozen-vm"
 
 def to_vsphere_format(tags):
     """Convert the Ray node name tag to the vSphere-specific 'Name' tag."""
@@ -62,18 +73,6 @@ def from_vsphere_format(tags):
         del tags["Name"]
     return tags
 
-def get_unverified_session():
-    """
-    Get a requests session with cert verification disabled.
-    Also disable the insecure warnings message.
-    Note this is not recommended in production code.
-    @return: a requests session with verification disabled.
-    """
-    session = requests.session()
-    session.verify = False
-    requests.packages.urllib3.disable_warnings()
-    return session
-
 class VsphereNodeProvider(NodeProvider):
     max_terminate_nodes = 1000
 
@@ -81,15 +80,16 @@ class VsphereNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         vsphere_credentials = provider_config.get("vsphere_config")
+        self.vsphere_credentials = vsphere_credentials
 
-        session = get_unverified_session()
-        self.vsphere_client = create_vsphere_client(
-            server=vsphere_credentials["server"],
-            username=vsphere_credentials["admin_user"],
-            password=vsphere_credentials["admin_password"],
-            session=session
-        )
+        self.vsphere_automation_sdk_client = VmwSdkClient(vsphere_credentials["server"], vsphere_credentials["admin_user"], 
+                                           vsphere_credentials["admin_password"], VmwSdkClient.SessionType.UNVERIFIED, VmwSdkClient.ClientType.AUTOMATION_SDK
+                                           ).get_client()
 
+        self.vsphere_pyvmomi_sdk_client = VmwSdkClient(vsphere_credentials["server"], vsphere_credentials["admin_user"], 
+                                           vsphere_credentials["admin_password"], VmwSdkClient.SessionType.UNVERIFIED, VmwSdkClient.ClientType.PYVMOMI_SDK
+                                           ).get_client()
+        
         # Tags that we believe to actually be on VM.
         self.tag_cache = {}
         # Tags that we will soon upload.
@@ -101,6 +101,35 @@ class VsphereNodeProvider(NodeProvider):
         # excessive DescribeInstances requests.
         self.cached_nodes : Dict[str, VM] = {}
 
+    class FreezeVMThread(threading.Thread):
+        def __init__(self, node_config, outer_obj):
+            self.node_config = copy.deepcopy(node_config)
+            self.node_config["library_item"] = node_config["freeze_vm_library_item"]
+            self.outer_obj = outer_obj
+            threading.Thread.__init__(self)
+
+        def run(self):
+            vm_name = FROZEN_VM_NAME
+
+            vms = self.outer_obj.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set(vm_name)))
+
+            # Frozen VM already present so no need to create again
+            if len(vms) > 0:
+                cli_logger.info("Frozen VM already exists")
+                return
+            
+            cli_logger.info("Creating frozen VM")
+            vm = self.outer_obj.create_ovf_node(self.node_config, vm_name)
+
+            vm_id = vm.vm
+            # Power on the created VM. If it was InstantClone then we would have
+            # powered it off after creation.
+            status = self.outer_obj.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
+            if status != HardPower.Info(state=HardPower.State.POWERED_ON):
+                cli_logger.info("Powering on VM")
+                self.outer_obj.vsphere_automation_sdk_client.vcenter.vm.Power.start(vm_id)
+                cli_logger.info('vm.Power.start({})'.format(vm_id))
+
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_vsphere(cluster_config)
@@ -110,7 +139,7 @@ class VsphereNodeProvider(NodeProvider):
             nodes = []
             # Get all POWERED_ON VMs
             cli_logger.info('Getting non terminated nodes...')
-            vms = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(power_states={HardPower.State.POWERED_ON}))
+            vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(power_states={HardPower.State.POWERED_ON}))
             cli_logger.info(f'Got {len(vms)} non terminated nodes.')
             filters = tag_filters.copy()
             if TAG_RAY_CLUSTER_NAME not in tag_filters:
@@ -123,8 +152,8 @@ class VsphereNodeProvider(NodeProvider):
                 matched_tags = {}
                 all_tags = {}
                 # If the VM has a tag from tag_filter then select it 
-                for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
-                    vsphere_vm_tag = self.vsphere_client.tagging.Tag.get(tag_id=tag_id).name 
+                for tag_id in self.vsphere_automation_sdk_client.tagging.TagAssociation.list_attached_tags(yn_id):
+                    vsphere_vm_tag = self.vsphere_automation_sdk_client.tagging.Tag.get(tag_id=tag_id).name 
                     if ':' in vsphere_vm_tag:
                         tag_key_value = vsphere_vm_tag.split(':')
                         tag_key = tag_key_value[0]
@@ -162,8 +191,11 @@ class VsphereNodeProvider(NodeProvider):
 
     def external_ip(self, node_id):
         # Return the external IP of the VM
-        vm = self.vsphere_client.vcenter.vm.guest.Identity.get(node_id)
 
+        vm = self.vsphere_automation_sdk_client.vcenter.vm.guest.Identity.get(node_id)
+
+        cli_logger.info("Fetch IP {} for VM {}".format(vm.ip_address, vm))
+        
         return vm.ip_address
 
     def internal_ip(self, node_id):
@@ -182,14 +214,16 @@ class VsphereNodeProvider(NodeProvider):
                 category_id = self.create_category()
 
             for key, value in tags.items():
-                # If a tag with a key is present on the VM, then remove it
-                # before updating the key with a new value.
-                self.remove_tag_from_vm(key, node_id)
 
                 tag = key+':'+value
                 tag_id = self.get_tag(tag, category_id )
                 if not tag_id:
                     tag_id = self.create_node_tag(tag, category_id)
+
+                # If a tag with a key is present on the VM, then remove it
+                # before updating the key with a new value.
+                self.remove_tag_from_vm(key, node_id)
+
                 self.attach_tag(node_id, TYPE_OF_RESOURCE, tag_id=tag_id)
 
     def create_node(self, node_config, tags, count) -> Dict[str, Any]:
@@ -211,7 +245,7 @@ class VsphereNodeProvider(NodeProvider):
         number_of_reused_nodes = 0
         # Try to reuse previously stopped nodes with compatible configs
         if self.cache_stopped_nodes:
-            vms = self.vsphere_client.vcenter.VM.list(
+            vms = self.vsphere_automation_sdk_client.vcenter.VM.list(
                 VM.FilterSpec(power_states={HardPower.State.POWERED_OFF, HardPower.State.SUSPENDED},
                             clusters={self.cluster_name}))
            
@@ -224,8 +258,8 @@ class VsphereNodeProvider(NodeProvider):
                 vm_id = vm.name
                 yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm.vm)
                 filter_matched_count = 0
-                for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
-                    vsphere_vm_tag = self.vsphere_client.tagging.Tag.get(tag_id=tag_id).name
+                for tag_id in self.vsphere_automation_sdk_client.tagging.TagAssociation.list_attached_tags(yn_id):
+                    vsphere_vm_tag = self.vsphere_automation_sdk_client.tagging.Tag.get(tag_id=tag_id).name
                     
                     if ':' in vsphere_vm_tag:
                         tag_key_value = vsphere_vm_tag.split(':')
@@ -249,7 +283,7 @@ class VsphereNodeProvider(NodeProvider):
                 )
                 for node_id in reuse_node_ids:
                     cli_logger.info("Powering on VM")
-                    self.vsphere_client.vcenter.vm.Power.start(node_id)
+                    self.vsphere_automation_sdk_client.vcenter.vm.Power.start(node_id)
                 counter -= len(reuse_node_ids)
 
         created_nodes_dict = {}
@@ -312,10 +346,10 @@ class VsphereNodeProvider(NodeProvider):
         dyn_id = DynamicID(type=resource_type, id=vm_id)
         try:
             cli_logger.info(f'Attaching tag {tag_id} to {vm_id}')
-            self.vsphere_client.tagging.TagAssociation.attach(tag_id, dyn_id)
+            self.vsphere_automation_sdk_client.tagging.TagAssociation.attach(tag_id, dyn_id)
             cli_logger.info('Tag attached')
         except Exception as e:
-            print("Check that the tag is associable to {}".format(resource_type))
+            cli_logger.info("Check that the tag is associable to {}".format(resource_type))
             raise e
     
     def set_cloudinit_userdata(self, vm_id):
@@ -361,7 +395,7 @@ class VsphereNodeProvider(NodeProvider):
                             interfaces=adapter_mapping_list)
         
         # create customization specification by CustomizationSpecs service
-        specs_svc = self.vsphere_client.vcenter.guest.CustomizationSpecs
+        specs_svc = self.vsphere_automation_sdk_client.vcenter.guest.CustomizationSpecs
         spec_name = str(uuid.uuid4())
         spec_desc = 'This is a customization specification which includes'\
                 'raw cloud-init configuration data'
@@ -370,30 +404,18 @@ class VsphereNodeProvider(NodeProvider):
                                         spec=customization_spec)
         specs_svc.create(spec=create_spec)
 
-        vmcust_svc = self.vsphere_client.vcenter.vm.guest.Customization
+        vmcust_svc = self.vsphere_automation_sdk_client.vcenter.vm.guest.Customization
         set_spec = vmcust_svc.SetSpec(name=spec_name, spec=None)
         vmcust_svc.set(vm=vm_id, spec=set_spec)
 
         logger.info("Successfully added cloudinit config for vm {}".format(vm_id))
         #####################################################################
 
-    def create_instant_clone_node(self, vm_clone_from, vm_name_target):
-        vm_clone_from_id = vm_clone_from.vm
-        clone_spec = VM.InstantCloneSpec(source=vm_clone_from_id, name=vm_name_target)
-        vm_id = self.vsphere_client.vcenter.VM.instant_clone(clone_spec)
-
-        # Restarting the VM gets a new IP for the VM.
-        # TODO: Find a better way to get a new IP without restarting.
-        self.vsphere_client.vcenter.vm.Power.stop(vm_id)
-        vm = self.get_vm(vm_id)
-
-        return vm
-
     def create_ovf_node(self, node_config, vm_name_target):
 
         # Find and use the resource pool defined in the manifest file.
         rp_filter_spec = ResourcePool.FilterSpec(names=set([node_config["resource_pool"]]))
-        resource_pool_summaries = self.vsphere_client.vcenter.ResourcePool.list(rp_filter_spec)
+        resource_pool_summaries = self.vsphere_automation_sdk_client.vcenter.ResourcePool.list(rp_filter_spec)
         if not resource_pool_summaries:
             raise ValueError("Resource pool with name '{}' not found".
                             format(rp_filter_spec))
@@ -404,14 +426,14 @@ class VsphereNodeProvider(NodeProvider):
 
         # Find and use the OVF library item defined in the manifest file.
         find_spec = Item.FindSpec(name=node_config["library_item"])
-        item_ids = self.vsphere_client.content.library.Item.find(find_spec)
+        item_ids = self.vsphere_automation_sdk_client.content.library.Item.find(find_spec)
 
         lib_item_id = item_ids[0]
 
         deployment_target = LibraryItem.DeploymentTarget(
             resource_pool_id=resource_pool_id
         )
-        ovf_summary = self.vsphere_client.vcenter.ovf.LibraryItem.filter(
+        ovf_summary = self.vsphere_automation_sdk_client.vcenter.ovf.LibraryItem.filter(
             ovf_library_item_id=lib_item_id,
             target=deployment_target)
         cli_logger.print('Found an OVF template: {} to deploy.'.format(ovf_summary.name))
@@ -431,7 +453,7 @@ class VsphereNodeProvider(NodeProvider):
             default_datastore_id=None)
 
         # Deploy the ovf template
-        result = self.vsphere_client.vcenter.ovf.LibraryItem.deploy(
+        result = self.vsphere_automation_sdk_client.vcenter.ovf.LibraryItem.deploy(
             lib_item_id,
             deployment_target,
             deployment_spec,
@@ -450,9 +472,9 @@ class VsphereNodeProvider(NodeProvider):
         else:
             cli_logger.print('Deployment failed.')
             for error in result.error.errors:
-                cli_logger.print('OVF error: {}'.format(error.message))
+                cli_logger.print('OVF error: {}'.format(result))
             
-            raise ValueError("OVF deployment failed for VM {}".format(vm_name_target))
+            raise ValueError("OVF deployment failed for VM {}, reason: {}".format(vm_name_target), result)
         
         # Get the created vm object
         vm = self.get_vm(result.resource_id.id)
@@ -470,19 +492,120 @@ class VsphereNodeProvider(NodeProvider):
         yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm_id)
 
         # List all the tags present on the VM.
-        for tag_id in self.vsphere_client.tagging.TagAssociation.list_attached_tags(yn_id):
-            vsphere_vm_tag = self.vsphere_client.tagging.Tag.get(tag_id=tag_id).name 
+        for tag_id in self.vsphere_automation_sdk_client.tagging.TagAssociation.list_attached_tags(yn_id):
+            vsphere_vm_tag = self.vsphere_automation_sdk_client.tagging.Tag.get(tag_id=tag_id).name 
             if ':' in vsphere_vm_tag:
                 tag_key_value = vsphere_vm_tag.split(':')
                 tag_key = tag_key_value[0]
                 if tag_key == tag_key_to_remove:
                     # Remove the tag matching the key passed.
                     cli_logger.info("Removing tag {} from the VM {}".format(tag_key, vm_id))
-                    self.vsphere_client.tagging.TagAssociation.detach(tag_id, yn_id)
+                    self.vsphere_automation_sdk_client.tagging.TagAssociation.detach(tag_id, yn_id)
                     break
 
+    def wait_until_power_on(self, vm_id, timeout, interval):
+        start = time.time()
+        status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
+        while status != HardPower.Info(state=HardPower.State.POWERED_ON) and time.time() - start < timeout:
+            cli_logger.info("waiting for power on of frozen VM")
+            time.sleep(interval)
+    
+    def find_vm_to_clone_from(self):
+        
+        vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set([FROZEN_VM_NAME])))
+
+        cli_logger.info("VM to clone from {}".format(vms))
+
+        return vms[0] if len(vms) > 0 else None
+    
+    def get_pyvmomi_obj(self, vimtype, name):
+        obj = None
+
+        # TODO: Find a better way to solve pyvmomi timeout issues
+        self.vsphere_pyvmomi_sdk_client = VmwSdkClient(self.vsphere_credentials["server"], self.vsphere_credentials["admin_user"], 
+                                           self.vsphere_credentials["admin_password"], VmwSdkClient.SessionType.UNVERIFIED, VmwSdkClient.ClientType.PYVMOMI_SDK
+                                           ).get_client()
+        
+        container = self.vsphere_pyvmomi_sdk_client.viewManager.CreateContainerView(self.vsphere_pyvmomi_sdk_client.rootFolder, vimtype, True)
+
+        for c in container.view:
+            if name:
+                if c.name == name:
+                    obj = c
+                    break
+            else:
+                obj = c
+                break
+        
+        return obj
+
+    def connect_nic(self, vm_obj):
+        nic_prefix_label = 'Network adapter 1'
+        nic_label = nic_prefix_label
+        virtual_nic_device = None
+
+        for dev in vm_obj.config.hardware.device:
+            if isinstance(dev, vim.vm.device.VirtualEthernetCard) \
+                    and dev.deviceInfo.label == nic_label:
+                virtual_nic_device = dev
+        if not virtual_nic_device:
+            raise RuntimeError('Virtual {} could not be found.'.format(nic_label))
+
+        virtual_nic_spec = vim.vm.device.VirtualDeviceSpec()
+        virtual_nic_spec.operation =  vim.vm.device.VirtualDeviceSpec.Operation.edit
+        virtual_nic_spec.device = virtual_nic_device
+        virtual_nic_spec.device.key = virtual_nic_device.key
+        virtual_nic_spec.device.macAddress = virtual_nic_device.macAddress
+        virtual_nic_spec.device.backing = virtual_nic_device.backing
+        virtual_nic_spec.device.wakeOnLanEnabled = \
+            virtual_nic_device.wakeOnLanEnabled
+        connectable = vim.vm.device.VirtualDevice.ConnectInfo()
+        connectable.connected = True
+        connectable.startConnected = True
+
+        virtual_nic_spec.device.connectable = connectable
+        dev_changes = [virtual_nic_spec]
+        spec = vim.vm.ConfigSpec()
+        spec.deviceChange = dev_changes
+
+        vm_obj.ReconfigVM_Task(spec=spec)
+
+    def create_instant_clone_node(self, source_vm, vm_name_target):
+        vm_relocate_spec = vim.vm.RelocateSpec()
+
+        instant_clone_spec = vim.vm.InstantCloneSpec()
+        instant_clone_spec.name = vm_name_target
+        instant_clone_spec.location = vm_relocate_spec
+        instant_clone_spec.config = None
+
+        parent_vm = self.get_pyvmomi_obj([vim.VirtualMachine], source_vm.name)
+  
+        WaitForTask(parent_vm.InstantClone_Task(spec=instant_clone_spec))
+
+        clone = self.get_pyvmomi_obj([vim.VirtualMachine], vm_name_target)
+
+        # The OVF file for frozen VM has the NIC in disconnected state because
+        # If we keep NIC connected upon power on for frozen VM then the VMs cloned from this VM
+        # for a transient moment will show wrong IP before refresing their network.
+
+        # Hence, we keep NIC disconnected in OVF of frozen VM so connect the NIC after powering on
+        # the cloned VMs
+        self.connect_nic(clone)
+        # Get VM ID
+        vm_id = str(clone).split(":")[1][:-1]
+
+        vm = self.get_vm(vm_id)
+
+        return vm
+    
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
+
+        # create a frozen VM if not already present
+
+        if "freeze_vm_library_item" in node_config and node_config["freeze_vm_library_item"] is not None:
+            frozen_vm_thread = self.FreezeVMThread(node_config, self)
+            frozen_vm_thread.start()
 
         for _ in range(count):
 
@@ -495,29 +618,27 @@ class VsphereNodeProvider(NodeProvider):
 
             # Check if clone_from config is present and that it contains a valid VM
             try:
-                vm = self.get_vm(node_config["clone_from"]) 
-            except KeyError:
+                vm = self.find_vm_to_clone_from() 
+
+            except ValueError:
                 cli_logger.info("clone_from config not present so creating VM from OVF.")
 
             # Clone from existing worker if we got a valid VM from clone_from config.
-            if "clone" in node_config and node_config["clone"] is True and vm != None:
-
+            if "clone" in node_config and node_config["clone"] == True and vm != None:
                 cli_logger.info("Clone the worker from {}".format(vm))
+                self.wait_until_power_on(vm.vm, 240, 3)
 
                 vm = self.create_instant_clone_node(vm, vm_name)
             else: 
-                
                 vm = self.create_ovf_node(node_config, vm_name)
-
-                node_config["clone_from"] = vm.vm
 
             vm_id = vm.vm
             # Power on the created VM. If it was InstantClone then we would have
             # powered it off after creation.
-            status = self.vsphere_client.vcenter.vm.Power.get(vm_id)
+            status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
             if status != HardPower.Info(state=HardPower.State.POWERED_ON):
                 cli_logger.info("Powering on VM")
-                self.vsphere_client.vcenter.vm.Power.start(vm_id)
+                self.vsphere_automation_sdk_client.vcenter.vm.Power.start(vm_id)
                 cli_logger.info('vm.Power.start({})'.format(vm_id))
             ### TO assign a tag to a node:
             ### 1. Create a category e.g RAY_NODE
@@ -532,16 +653,16 @@ class VsphereNodeProvider(NodeProvider):
         return created_nodes_dict
 
     def get_tag(self, tag_name, category_id):
-        for id in self.vsphere_client.tagging.Tag.list_tags_for_category(category_id):
-            if tag_name == self.vsphere_client.tagging.Tag.get(id).name:
+        for id in self.vsphere_automation_sdk_client.tagging.Tag.list_tags_for_category(category_id):
+            if tag_name == self.vsphere_automation_sdk_client.tagging.Tag.get(id).name:
                 return id
         return None
 
     def create_node_tag(self, ray_node_tag, category_id):
         cli_logger.info(f'Creating {ray_node_tag} tag')
-        tag_spec = self.vsphere_client.tagging.Tag.CreateSpec(ray_node_tag, "Ray node tag", category_id)
+        tag_spec = self.vsphere_automation_sdk_client.tagging.Tag.CreateSpec(ray_node_tag, "Ray node tag", category_id)
         try:
-            tag_id = self.vsphere_client.tagging.Tag.create(tag_spec)
+            tag_id = self.vsphere_automation_sdk_client.tagging.Tag.create(tag_spec)
         except ErrorClients.Unauthorized as e:
             cli_logger.abort(f'Unathorised to create the tag. Exception: {e.messages}')
         except Exception as e:
@@ -551,22 +672,22 @@ class VsphereNodeProvider(NodeProvider):
         return tag_id
 
     def get_category(self):
-        for id in self.vsphere_client.tagging.Category.list():
-            if self.vsphere_client.tagging.Category.get(id).name == NODE_CATEGORY:
+        for id in self.vsphere_automation_sdk_client.tagging.Category.list():
+            if self.vsphere_automation_sdk_client.tagging.Category.get(id).name == NODE_CATEGORY:
                 return id
         return None
 
     def create_category(self):
         # Create RAY_NODE category. This category is associated with VMs and supports multiple tags e.g. "Ray-Head-Node, Ray-Worker-Node-1 etc."
         cli_logger.info(f'Creating {NODE_CATEGORY} category')
-        category_spec = self.vsphere_client.tagging.Category.CreateSpec(name=NODE_CATEGORY, 
+        category_spec = self.vsphere_automation_sdk_client.tagging.Category.CreateSpec(name=NODE_CATEGORY, 
                                        description="Identifies Ray head node and worker nodes", 
                                        cardinality=CategoryModel.Cardinality.MULTIPLE,
                                        associable_types=set())
         category_id = None
 
         try:
-            category_id = self.vsphere_client.tagging.Category.create(category_spec)
+            category_id = self.vsphere_automation_sdk_client.tagging.Category.create(category_spec)
         except ErrorClients.Unauthorized as e:
             cli_logger.abort(f'Unathorised to create the category. Exception: {e.messages}')
         except Exception as e:
@@ -580,12 +701,12 @@ class VsphereNodeProvider(NodeProvider):
         if node_id is None:
             return
         
-        status = self.vsphere_client.vcenter.vm.Power.get(node_id)
+        status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(node_id)
         if status != HardPower.Info(state=HardPower.State.POWERED_OFF):
-            self.vsphere_client.vcenter.vm.Power.stop(node_id)
+            self.vsphere_automation_sdk_client.vcenter.vm.Power.stop(node_id)
             cli_logger.info('vm.Power.stop({})'.format(node_id))
             
-        self.vsphere_client.vcenter.VM.delete(node_id)
+        self.vsphere_automation_sdk_client.vcenter.VM.delete(node_id)
         cli_logger.info("Deleted vm {}".format(node_id))
         self.cached_nodes.pop(node_id)
         self.tag_cache.pop(node_id)
@@ -601,9 +722,9 @@ class VsphereNodeProvider(NodeProvider):
         """Refresh and get info for this node, updating the cache."""
         self.non_terminated_nodes({})  # Side effect: updates cache
 
-        vms  = self.vsphere_client.vcenter.VM.list(VM.FilterSpec(vms=set([node_id])))
+        vms  = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(vms=set([node_id])))
         if len(vms) == 0:
-            print("VM with name ({}) not found".format(node_id))
+            cli_logger.error("VM with name ({}) not found".format(node_id))
             return None
         return vms[0]
 
