@@ -1,37 +1,30 @@
-from typing import Dict
 from threading import RLock
 import pytest
 import threading
 from unittest.mock import MagicMock, patch
-from collections import defaultdict
-
-from ray.autoscaler._private.vsphere.node_provider import (
-    get_unverified_session,
-    
-)
 
 from com.vmware.vcenter.vm_client import Power as HardPower
-from vmware.vapi.vsphere.client import create_vsphere_client
 from python.ray.autoscaler._private.vsphere.node_provider import VsphereNodeProvider
 from com.vmware.vcenter_client import VM
 from com.vmware.vcenter_client import ResourcePool
 from com.vmware.content.library_client import Item
 from com.vmware.vcenter.ovf_client import LibraryItem
-import com.vmware.vapi.std.errors_client as ErrorClients
 
 _CLUSTER_NAME = "test"
 _PROVIDER_CONFIG = {
-        "vsphere_config":{
-            "admin_user": "test@vsphere.local",
-            "admin_password": "test",
-            "server": "10.188.17.50",
-            "datacenter": "test",
-            "datastore": "testDatastore",
-        }
+    "vsphere_config": {
+        "admin_user": "test@vsphere.local",
+        "admin_password": "test",
+        "server": "10.188.17.50",
+        "datacenter": "test",
+        "datastore": "testDatastore",
     }
+}
+
 
 def test_non_terminated_nodes_returns_no_node():
     """If all nodes are in POWERED_ONmode then the function should return no node"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         self.lock = RLock()
         self.vsphere_client = MagicMock()
@@ -40,17 +33,19 @@ def test_non_terminated_nodes_returns_no_node():
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     # test
     nodes = node_provider.non_terminated_nodes({})
-    
+
     # assert
     assert node_provider is not None
     assert len(nodes) == 0
 
+
 def test_non_terminated_nodes_returns_node():
-    """If there is a POWERED_ON node and it matches `ray-cluster-name` tag 
-    function should return that node """
+    """If there is a POWERED_ON node and it matches `ray-cluster-name` tag
+    function should return that node"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         self.lock = RLock()
         self.tag_cache = {}
@@ -60,17 +55,18 @@ def test_non_terminated_nodes_returns_node():
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     mock_vm1 = MagicMock()
     mock_vm1.vm = "test-1"
-    
+
     node_provider.vsphere_client.vcenter.VM.list.return_value = [mock_vm1]
-    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.return_value = ["test_tag_id "]
-    
+    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.\
+        return_value = ["test_tag_id "]
+
     mock_tag = MagicMock()
     mock_tag.name = "ray-cluster-name:test"
     node_provider.vsphere_client.tagging.Tag.get.return_value = mock_tag
-    
+
     # test
     nodes = node_provider.non_terminated_nodes({})
     # assert
@@ -79,10 +75,11 @@ def test_non_terminated_nodes_returns_node():
     assert node_provider.cached_nodes.__contains__("test-1")
     assert nodes[0] == "test-1"
 
+
 def test_non_terminated_nodes_returns_no_node_if_tag_not_matched():
     """If there is a POWERED_ON node and it does not matches any tag then
-    function should return that node """
-    
+    function should return that node"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         self.lock = RLock()
         self.tag_cache = {}
@@ -92,26 +89,28 @@ def test_non_terminated_nodes_returns_no_node_if_tag_not_matched():
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     mock_vm1 = MagicMock()
     mock_vm1.vm = "test-1"
-    
+
     node_provider.vsphere_client.vcenter.VM.list.return_value = [mock_vm1]
-    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.return_value = ["test_tag_id "]
-    
+    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.\
+        return_value = ["test_tag_id "]
+
     mock_tag = MagicMock()
     mock_tag.name = "ray-cluster-name:default"
     node_provider.vsphere_client.tagging.Tag.get.return_value = mock_tag
-    
+
     # test
     nodes = node_provider.non_terminated_nodes({})
     # assert
     assert node_provider is not None
     assert len(nodes) == 0
 
+
 def test_is_running():
-    """Should return true if a cached node is in POWERED_ON state """
-    
+    """Should return true if a cached node is in POWERED_ON state"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         pass
 
@@ -120,18 +119,19 @@ def test_is_running():
         mock_vm1.power_state = HardPower.State.POWERED_ON
         # self._get_cached_node.return_value = mock_vm1
         return mock_vm1
-        
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     with patch.object(VsphereNodeProvider, "_get_cached_node", _get_cached_node):
         is_running = node_provider.is_running("test_node_id")
     # assert
     assert is_running == True
 
+
 def test_is_terminated():
-    """Should return true if a cached node is not in POWERED_ON state """
-    
+    """Should return true if a cached node is not in POWERED_ON state"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         pass
 
@@ -140,52 +140,58 @@ def test_is_terminated():
         mock_vm1.power_state = HardPower.State.POWERED_ON
         # self._get_cached_node.return_value = mock_vm1
         return mock_vm1
-        
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     with patch.object(VsphereNodeProvider, "_get_cached_node", _get_cached_node):
         is_terminated = node_provider.is_running("test_node_id")
-    
+
     # assert
     assert is_terminated is True
 
+
 def test_node_tags():
     """Should return chached tags of a node"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         self.tag_cache_lock = threading.Lock()
         self.tag_cache = {}
-        self.tag_cache["test_vm_id_1"] = {"ray-cluster-name":"test",
-                                          "ray-launch-config": "test_id",
-                                          "ray-node-type": "head",
-                                          "ray-node-name": "test-node",
-                                          }
+        self.tag_cache["test_vm_id_1"] = {
+            "ray-cluster-name": "test",
+            "ray-launch-config": "test_id",
+            "ray-node-type": "head",
+            "ray-node-name": "test-node",
+        }
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
     # test
     tags = node_provider.node_tags("test_vm_id_1")
-    # assert 
+    # assert
     assert tags == node_provider.tag_cache["test_vm_id_1"]
+
 
 def test_external_ip():
     """If there is a POWERED_ON node and it does not matches any tag then
-    function should return that node """
-    
+    function should return that node"""
+
     def __init__(self, provider_config: dict, cluster_name: str):
         self.vsphere_client = MagicMock()
-    
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     vm = MagicMock()
     vm.ip_address = "10.123.234.255"
     node_provider.vsphere_client.vcenter.vm.guest.Identity.get.return_value = vm
-    
+
     # test
     ip_address = node_provider.external_ip("test_id")
     # assert
     assert node_provider is not None
     assert ip_address == "10.123.234.255"
+
 
 def test_create_nodes():
     def __init__(self, provider_config: dict, cluster_name: str):
@@ -194,7 +200,7 @@ def test_create_nodes():
         self.cluster_name = cluster_name
 
         self.vsphere_client = MagicMock()
-    
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
 
@@ -207,8 +213,9 @@ def test_create_nodes():
     mock_vm2.vm = "node-2"
 
     node_provider.vsphere_client.vcenter.VM.list.return_value = [mock_vm1, mock_vm2]
-    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.return_value = ["test_tag_id1"]
-    
+    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.\
+        return_value = ["test_tag_id1"]
+
     mock_tag = MagicMock()
     mock_tag.name = "ray-cluster-name:test"
     node_provider.vsphere_client.tagging.Tag.get.return_value = mock_tag
@@ -222,14 +229,15 @@ def test_create_nodes():
     node_provider.set_node_tags = MagicMock()
     node_provider._create_node = MagicMock()
     node_provider._create_node.return_value = {"test-3": "New VM Instance"}
-    
+
     # test
-    all_nodes = node_provider.create_node({},{"ray-cluster-name":"test"}, 3)
+    all_nodes = node_provider.create_node({}, {"ray-cluster-name": "test"}, 3)
     # assert
     assert node_provider is not None
     assert len(all_nodes) == 3
     # assert that two nodes are reused and one is created
-    node_provider._create_node.assert_called_with({}, {"ray-cluster-name":"test"}, 1)
+    node_provider._create_node.assert_called_with({}, {"ray-cluster-name": "test"}, 1)
+
 
 def test_get_vm():
     def __init__(self, provider_config: dict, cluster_name: str):
@@ -238,23 +246,24 @@ def test_get_vm():
     def _get_cached_node(self, node_id: str):
         nodes = {"test-1": "instance-1", "test-2": "instance-2"}
         return nodes[node_id]
-    
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     with patch.object(VsphereNodeProvider, "_get_cached_node", _get_cached_node):
         vm = node_provider.get_vm("test-2")
-    
+
     # assert
     assert node_provider is not None
     assert vm == "instance-2"
+
 
 def test_create_instant_clone_node():
     def __init__(self, provider_config: dict, cluster_name: str):
         VM.InstantCloneSpec = MagicMock()
         VM.InstantCloneSpec.return_value = "Clone Spec"
         self.vsphere_client = MagicMock()
-        self.vsphere_client.vcenter.VM.instant_clone  = MagicMock()
+        self.vsphere_client.vcenter.VM.instant_clone = MagicMock()
         self.vsphere_client.vcenter.VM.instant_clone.return_value = "test_id_1"
         self.vsphere_client.vcenter.vm.Power.stop = MagicMock()
         self.get_vm = MagicMock()
@@ -262,39 +271,45 @@ def test_create_instant_clone_node():
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     vm_clone_from = MagicMock()
     vm_clone_from.vm = "test-1"
     # test
     vm = node_provider.create_instant_clone_node(vm_clone_from, "target-vm")
     # assert
     assert vm == "test VM"
-    node_provider.vsphere_client.vcenter.VM.instant_clone.assert_called_with("Clone Spec")
+    node_provider.vsphere_client.vcenter.VM.instant_clone.assert_called_with(
+        "Clone Spec"
+    )
+
 
 def test_create_ovf_node_rp_summaries_not_found():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.resourcepoolname = "test_resource_pool"
         self.vsphere_client = MagicMock()
-    
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
         ResourcePool.FilterSpec = MagicMock()
         ResourcePool.FilterSpec.return_value = "resource_pool_spec"
         node_provider.vsphere_client.vcenter.ResourcePool.list = MagicMock()
         node_provider.vsphere_client.vcenter.ResourcePool.list.return_value = None
-    
+
     # test
     with pytest.raises(ValueError) as error:
         node_provider.create_ovf_node({"resource_pool": "test_rp"}, "target_vm")
         # assert
-        assert error.value.message == f"Resource pool with name {node_provider.resourcepoolname} not found"
-        
+        assert (
+            error.value.message
+            == f"Resource pool with name {node_provider.resourcepoolname} not found"
+        )
+
 
 def test_create_ovf_node_OVF_deployment_failed():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.resourcepoolname = "test_resource_pool"
         self.vsphere_client = MagicMock()
-    
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
 
@@ -304,7 +319,9 @@ def test_create_ovf_node_OVF_deployment_failed():
 
     resource_pool_summary = MagicMock()
     resource_pool_summary.resource_pool = "resource_pool_1"
-    node_provider.vsphere_client.vcenter.ResourcePool.list.return_value = resource_pool_summary
+    node_provider.vsphere_client.vcenter.ResourcePool.list.return_value = (
+        resource_pool_summary
+    )
 
     Item.FindSpec = MagicMock()
     Item.FindSpec.return_value = "item_spec"
@@ -318,7 +335,9 @@ def test_create_ovf_node_OVF_deployment_failed():
     mock_summary = MagicMock()
     mock_summary.name = "ovf_summary"
     node_provider.vsphere_client.vcenter.ovf.LibraryItem.filter = MagicMock()
-    node_provider.vsphere_client.vcenter.ovf.LibraryItem.filter.return_value = mock_summary
+    node_provider.vsphere_client.vcenter.ovf.LibraryItem.filter.return_value = (
+        mock_summary
+    )
 
     LibraryItem.ResourcePoolDeploymentSpec = MagicMock()
     LibraryItem.ResourcePoolDeploymentSpec.return_value = "deployment_spec"
@@ -329,20 +348,25 @@ def test_create_ovf_node_OVF_deployment_failed():
     mock_error.message = "error_1"
     mock_result.error.errors = [mock_error]
     node_provider.vsphere_client.vcenter.ovf.LibraryItem.deploy = MagicMock()
-    node_provider.vsphere_client.vcenter.ovf.LibraryItem.deploy.return_value = mock_result
+    node_provider.vsphere_client.vcenter.ovf.LibraryItem.deploy.return_value = (
+        mock_result
+    )
 
     vm_name_target = "target_vm"
     # test
     with pytest.raises(ValueError) as error:
-        node_provider.create_ovf_node({"resource_pool": "test_rp", "library_item": "item"}, vm_name_target)
+        node_provider.create_ovf_node(
+            {"resource_pool": "test_rp", "library_item": "item"}, vm_name_target
+        )
         # assert
         assert error.value.message == f"OVF deployment failed for VM {vm_name_target}"
+
 
 def test_create_ovf_node():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.resourcepoolname = "test_resource_pool"
         self.vsphere_client = MagicMock()
-    
+
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
 
@@ -352,7 +376,9 @@ def test_create_ovf_node():
 
     resource_pool_summary = MagicMock()
     resource_pool_summary.resource_pool = "resource_pool_1"
-    node_provider.vsphere_client.vcenter.ResourcePool.list.return_value = resource_pool_summary
+    node_provider.vsphere_client.vcenter.ResourcePool.list.return_value = (
+        resource_pool_summary
+    )
 
     Item.FindSpec = MagicMock()
     Item.FindSpec.return_value = "item_spec"
@@ -366,7 +392,9 @@ def test_create_ovf_node():
     mock_summary = MagicMock()
     mock_summary.name = "ovf_summary"
     node_provider.vsphere_client.vcenter.ovf.LibraryItem.filter = MagicMock()
-    node_provider.vsphere_client.vcenter.ovf.LibraryItem.filter.return_value = mock_summary
+    node_provider.vsphere_client.vcenter.ovf.LibraryItem.filter.return_value = (
+        mock_summary
+    )
 
     LibraryItem.ResourcePoolDeploymentSpec = MagicMock()
     LibraryItem.ResourcePoolDeploymentSpec.return_value = "deployment_spec"
@@ -375,21 +403,26 @@ def test_create_ovf_node():
     mock_result.succeeded = True
     mock_result.resource_id.id = "resource_id"
     node_provider.vsphere_client.vcenter.ovf.LibraryItem.deploy = MagicMock()
-    node_provider.vsphere_client.vcenter.ovf.LibraryItem.deploy.return_value = mock_result
+    node_provider.vsphere_client.vcenter.ovf.LibraryItem.deploy.return_value = (
+        mock_result
+    )
 
     mock_vm = MagicMock()
     mock_vm.vm = "vm_1"
     node_provider.get_vm = MagicMock()
     node_provider.get_vm.return_value = mock_vm
     node_provider.set_cloudinit_userdata = MagicMock()
-    
+
     vm_name_target = "target_vm"
     # test
-    vm = node_provider.create_ovf_node({"resource_pool": "test_rp", "library_item": "item"}, vm_name_target)
+    vm = node_provider.create_ovf_node(
+        {"resource_pool": "test_rp", "library_item": "item"}, vm_name_target
+    )
     # assert
     assert vm.vm == mock_vm.vm
     node_provider.get_vm.assert_called_with(mock_result.resource_id.id)
     node_provider.set_cloudinit_userdata.assert_called_with(vm.vm)
+
 
 def test__create_node():
     def __init__(self, provider_config: dict, cluster_name: str):
@@ -397,7 +430,7 @@ def test__create_node():
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     node_config = {"clone_from": "vm_1", "clone": True}
 
     mock_vm = MagicMock()
@@ -408,7 +441,9 @@ def test__create_node():
     node_provider.create_instant_clone_node.return_value = mock_vm
 
     node_provider.vsphere_client.vcenter.vm.Power.get = MagicMock()
-    node_provider.vsphere_client.vcenter.vm.Power.get.return_value = HardPower.Info(state=HardPower.State.POWERED_OFF)
+    node_provider.vsphere_client.vcenter.vm.Power.get.return_value = HardPower.Info(
+        state=HardPower.State.POWERED_OFF
+    )
     node_provider.vsphere_client.vcenter.vm.Power.start = MagicMock()
 
     node_provider.get_category = MagicMock()
@@ -423,7 +458,9 @@ def test__create_node():
     node_provider.create_ovf_node = MagicMock()
 
     # test
-    created_nodes_dict = node_provider._create_node(node_config, {"ray-node-name": "ray-node-1", "ray-node-type": "head"}, 2)
+    created_nodes_dict = node_provider._create_node(
+        node_config, {"ray-node-name": "ray-node-1", "ray-node-type": "head"}, 2
+    )
     # assert
     # Make sure 2 nodes are created
     assert len(created_nodes_dict) == 2
@@ -431,9 +468,12 @@ def test__create_node():
     node_provider.create_ovf_node.assert_not_called
     node_provider.vsphere_client.vcenter.vm.Power.start.assert_called_with(mock_vm.vm)
     node_provider.create_category.assert_called
-    node_provider.attach_tag.assert_called_with(mock_vm.vm, 'VirtualMachine', tag_id="tag_id")
+    node_provider.attach_tag.assert_called_with(
+        mock_vm.vm, "VirtualMachine", tag_id="tag_id"
+    )
     # attaching 2 tags on 2 nodes
     assert node_provider.attach_tag.call_count == 4
+
 
 def test_get_tag():
     def __init__(self, provider_config: dict, cluster_name: str):
@@ -441,12 +481,14 @@ def test_get_tag():
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     mock_tag = MagicMock()
     mock_tag.name = "ray-node-name"
 
     node_provider.vsphere_client.tagging.Tag.list_tags_for_category = MagicMock()
-    node_provider.vsphere_client.tagging.Tag.list_tags_for_category.return_value = ["tag_1"]
+    node_provider.vsphere_client.tagging.Tag.list_tags_for_category.return_value = [
+        "tag_1"
+    ]
     node_provider.vsphere_client.tagging.Tag.get = MagicMock()
     node_provider.vsphere_client.tagging.Tag.get.return_value = mock_tag
 
@@ -455,18 +497,21 @@ def test_get_tag():
     # assert
     assert id == "tag_1"
 
+
 def test_get_tag_return_none():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.vsphere_client = MagicMock()
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     mock_tag = MagicMock()
     mock_tag.name = "ray-node-name"
 
     node_provider.vsphere_client.tagging.Tag.list_tags_for_category = MagicMock()
-    node_provider.vsphere_client.tagging.Tag.list_tags_for_category.return_value = ["tag_1"]
+    node_provider.vsphere_client.tagging.Tag.list_tags_for_category.return_value = [
+        "tag_1"
+    ]
     node_provider.vsphere_client.tagging.Tag.get = MagicMock()
     node_provider.vsphere_client.tagging.Tag.get.return_value = mock_tag
 
@@ -475,13 +520,14 @@ def test_get_tag_return_none():
     # assert
     assert id is None
 
+
 def test_create_node_tag():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.vsphere_client = MagicMock()
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     node_provider.vsphere_client.tagging.Tag.CreateSpec = MagicMock()
     node_provider.vsphere_client.tagging.Tag.CreateSpec.return_value = "tag_spec"
 
@@ -493,13 +539,14 @@ def test_create_node_tag():
     # assert
     assert tag_id == "tag_id_1"
 
-def test_get_tag():
+
+def test_get_category():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.vsphere_client = MagicMock()
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     node_provider.vsphere_client.tagging.Category.list = MagicMock()
     node_provider.vsphere_client.tagging.Category.list.return_value = ["category_1"]
 
@@ -519,15 +566,18 @@ def test_get_tag():
     # assert
     assert id is None
 
+
 def test_create_category():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.vsphere_client = MagicMock()
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     node_provider.vsphere_client.tagging.Category.CreateSpec = MagicMock()
-    node_provider.vsphere_client.tagging.Category.CreateSpec.return_value = "category_spec"
+    node_provider.vsphere_client.tagging.Category.CreateSpec.return_value = (
+        "category_spec"
+    )
     node_provider.vsphere_client.tagging.Category.create = MagicMock()
     node_provider.vsphere_client.tagging.Category.create.return_value = "category_id_1"
 
@@ -535,6 +585,7 @@ def test_create_category():
     category_id = node_provider.create_category()
     # assert
     assert category_id == "category_id_1"
+
 
 def test_terminate_node():
     def __init__(self, provider_config: dict, cluster_name: str):
@@ -548,23 +599,28 @@ def test_terminate_node():
     mock_vm2 = MagicMock()
     mock_vm2.vm = "vm2"
     cached_vms = {"vm_1": mock_vm1, "vm_2": mock_vm2}
+
     def side_effect(arg):
         return cached_vms[arg]
-    node_provider._get_cached_node = MagicMock(side_effect = side_effect)
+
+    node_provider._get_cached_node = MagicMock(side_effect=side_effect)
     node_provider.vsphere_client.vcenter.vm.Power.stop = MagicMock()
 
     # test
     node_provider.terminate_node("vm_2")
     # assert
-    node_provider.vsphere_client.vcenter.vm.Power.stop.assert_called_once_with(mock_vm2.vm)
-   
+    node_provider.vsphere_client.vcenter.vm.Power.stop.assert_called_once_with(
+        mock_vm2.vm
+    )
+
+
 def test__get_node():
     def __init__(self, provider_config: dict, cluster_name: str):
         self.vsphere_client = MagicMock()
 
     with patch.object(VsphereNodeProvider, "__init__", __init__):
         node_provider = VsphereNodeProvider(_PROVIDER_CONFIG, _CLUSTER_NAME)
-    
+
     node_provider.non_terminated_nodes = MagicMock()
     node_provider.vsphere_client.vcenter.VM.list = MagicMock()
     node_provider.vsphere_client.vcenter.VM.list.return_value = ["vm_1"]
@@ -579,141 +635,6 @@ def test__get_node():
     vm = node_provider._get_node("node_id_1")
     # assert
     assert vm is None
-
-
-
-
-
-    
-
-
-
-
-
-    
-
-
-
-
-
-
-    
-    
-
-# def test_non_terminated_nodes():
-#     with patch("ray.autoscaler._private.vsphere.node_provider.get_unverified_session",
-#                "vmware.vapi.vsphere.client.create_vsphere_client"):
-#         provider = VsphereNodeProvider(
-#             provider_config=_PROVIDER_CONFIG,
-#             cluster_name=_CLUSTER_NAME,
-#         )
-#         provider.lock = RLock()
-#         vm = MagicMock()
-#         vm.vm.return_value = "test-1"
-#         provider.vsphere_client.vcenter.VM = MagicMock()
-#         provider.vsphere_client.vcenter.VM.list.return_value = []
-
-#         # test
-#         nodes = provider.non_terminated_nodes({})
-
-#         # assert
-#         assert len(nodes) == 0
-
-
-
-
-
-
-# def test_create_node_returns_dict():
-#     mock_node_config = {"machineType": "n2-standard-8"}
-#     mock_results = [({"dict": 1}, "instance_id1"), ({"dict": 2}, "instance_id2")]
-#     mock_resource = MagicMock()
-#     mock_resource.create_instances.return_value = mock_results
-#     expected_return_value = {"instance_id1": {"dict": 1}, "instance_id2": {"dict": 2}}
-
-#     def __init__(self, provider_config: dict, cluster_name: str):
-#         self.lock = RLock()
-#         self.cached_nodes: Dict[str, GCPNode] = {}
-#         self.resources: Dict[GCPNodeType, GCPResource] = {}
-#         self.resources[GCPNodeType.COMPUTE] = mock_resource
-
-#     with patch.object(GCPNodeProvider, "__init__", __init__):
-#         node_provider = GCPNodeProvider({}, "")
-#         create_node_return_value = node_provider.create_node(mock_node_config, {}, 1)
-#     assert create_node_return_value == expected_return_value
-
-
-# def test_terminate_nodes():
-#     mock_node_config = {"machineType": "n2-standard-8"}
-#     node_type = GCPNodeType.COMPUTE.value
-#     id1, id2 = f"instance-id1-{node_type}", f"instance-id2-{node_type}"
-#     terminate_node_ids = [id1, id2]
-#     mock_resource = MagicMock()
-#     mock_resource.create_instances.return_value = [
-#         ({"dict": 1}, id1),
-#         ({"dict": 2}, id2),
-#     ]
-#     mock_resource.delete_instance.return_value = "test"
-#     expected_terminate_nodes_result_len = 2
-
-#     def __init__(self, provider_config: dict, cluster_name: str):
-#         self.lock = RLock()
-#         self.cached_nodes: Dict[str, GCPNode] = {}
-#         self.resources: Dict[GCPNodeType, GCPResource] = {}
-#         self.resources[GCPNodeType.COMPUTE] = mock_resource
-
-#     with patch.object(GCPNodeProvider, "__init__", __init__):
-#         node_provider = GCPNodeProvider({}, "")
-#         node_provider.create_node(mock_node_config, {}, 1)
-#         create_results = node_provider.terminate_nodes(terminate_node_ids)
-
-#     assert len(create_results) == expected_terminate_nodes_result_len
-
-
-# @pytest.mark.parametrize(
-#     "test_case",
-#     [
-#         ("n1-standard-4", f"zones/{_AZ}/machineTypes/n1-standard-4"),
-#         (
-#             f"zones/{_AZ}/machineTypes/n1-standard-4",
-#             f"zones/{_AZ}/machineTypes/n1-standard-4",
-#         ),
-#     ],
-# )
-# def test_convert_resources_to_urls_machine(test_case):
-#     gcp_compute = GCPCompute(None, _PROJECT_NAME, _AZ, "cluster_name")
-#     base_machine, result_machine = test_case
-#     modified_config = gcp_compute._convert_resources_to_urls(
-#         {"machineType": base_machine}
-#     )
-#     assert modified_config["machineType"] == result_machine
-
-
-# @pytest.mark.parametrize(
-#     "test_case",
-#     [
-#         (
-#             "nvidia-tesla-k80",
-#             f"projects/{_PROJECT_NAME}/zones/{_AZ}/acceleratorTypes/nvidia-tesla-k80",
-#         ),
-#         (
-#             f"projects/{_PROJECT_NAME}/zones/{_AZ}/acceleratorTypes/nvidia-tesla-k80",
-#             f"projects/{_PROJECT_NAME}/zones/{_AZ}/acceleratorTypes/nvidia-tesla-k80",
-#         ),
-#     ],
-# )
-# def test_convert_resources_to_urls_accelerators(test_case):
-#     gcp_compute = GCPCompute(None, _PROJECT_NAME, _AZ, "cluster_name")
-#     base_accel, result_accel = test_case
-
-#     base_config = {
-#         "machineType": "n1-standard-4",
-#         "guestAccelerators": [{"acceleratorCount": 1, "acceleratorType": base_accel}],
-#     }
-#     modified_config = gcp_compute._convert_resources_to_urls(base_config)
-
-#     assert modified_config["guestAccelerators"][0]["acceleratorType"] == result_accel
-
 
 if __name__ == "__main__":
     import sys
