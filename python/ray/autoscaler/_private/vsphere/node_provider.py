@@ -192,29 +192,6 @@ class VsphereNodeProvider(NodeProvider):
                     tag_id = self.create_node_tag(tag, category_id)
                 self.attach_tag(node_id, TYPE_OF_RESOURCE, tag_id=tag_id)
 
-    def _update_node_tags(self):
-        batch_updates = defaultdict(list)
-
-        for node_id, tags in self.tag_cache_pending.items():
-            for x in tags.items():
-                batch_updates[x].append(node_id)
-            self.tag_cache[node_id].update(tags)
-
-        self.tag_cache_pending = defaultdict(dict)
-
-        self._create_tags(batch_updates)
-
-    def _create_tags(self, batch_updates):
-        for (k, v), node_ids in batch_updates.items():
-            m = "Set tag {}={} on {}".format(k, v, node_ids)
-            with LogTimer("AWSNodeProvider: {}".format(m)):
-                if k == TAG_RAY_NODE_NAME:
-                    k = "Name"
-                self.ec2.meta.client.create_tags(
-                    Resources=node_ids,
-                    Tags=[{"Key": k, "Value": v}],
-                )
-
     def create_node(self, node_config, tags, count) -> Dict[str, Any]:
         """Creates instances.
 
@@ -636,71 +613,3 @@ class VsphereNodeProvider(NodeProvider):
             return self.cached_nodes[node_id]
 
         return self._get_node(node_id)
-
-    @staticmethod
-    def fillout_available_node_types_resources(
-        cluster_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Fills out missing "resources" field for available_node_types."""
-        if "available_node_types" not in cluster_config:
-            return cluster_config
-        cluster_config = copy.deepcopy(cluster_config)
-
-        instances_list = list_ec2_instances(
-            cluster_config["provider"]["region"],
-            cluster_config["provider"].get("aws_credentials"),
-        )
-        instances_dict = {
-            instance["InstanceType"]: instance for instance in instances_list
-        }
-        available_node_types = cluster_config["available_node_types"]
-        head_node_type = cluster_config["head_node_type"]
-        for node_type in available_node_types:
-            instance_type = available_node_types[node_type]["node_config"][
-                "InstanceType"
-            ]
-            if instance_type in instances_dict:
-                cpus = instances_dict[instance_type]["VCpuInfo"]["DefaultVCpus"]
-
-                autodetected_resources = {"CPU": cpus}
-                if node_type != head_node_type:
-                    # we only autodetect worker node type memory resource
-                    memory_total = instances_dict[instance_type]["MemoryInfo"][
-                        "SizeInMiB"
-                    ]
-                    memory_total = int(memory_total) * 1024 * 1024
-                    prop = 1 - ray_constants.DEFAULT_OBJECT_STORE_MEMORY_PROPORTION
-                    memory_resources = int(memory_total * prop)
-                    autodetected_resources["memory"] = memory_resources
-
-                gpus = instances_dict[instance_type].get("GpuInfo", {}).get("Gpus")
-                if gpus is not None:
-                    # TODO(ameer): currently we support one gpu type per node.
-                    assert len(gpus) == 1
-                    gpu_name = gpus[0]["Name"]
-                    autodetected_resources.update(
-                        {"GPU": gpus[0]["Count"], f"accelerator_type:{gpu_name}": 1}
-                    )
-                autodetected_resources.update(
-                    available_node_types[node_type].get("resources", {})
-                )
-                if autodetected_resources != available_node_types[node_type].get(
-                    "resources", {}
-                ):
-                    available_node_types[node_type][
-                        "resources"
-                    ] = autodetected_resources
-                    cli_logger.info(
-                        "Updating the resources of {} to {}.".format(
-                            node_type, autodetected_resources
-                        )
-                    )
-            else:
-                raise ValueError(
-                    "Instance type "
-                    + instance_type
-                    + " is not available in AWS region: "
-                    + cluster_config["provider"]["region"]
-                    + "."
-                )
-        return cluster_config
