@@ -14,8 +14,6 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple, U
 
 import grpc
 import yaml
-from com.vmware.vcenter_client import VM
-from com.vmware.vapi.std_client import DynamicID
 
 from ray.autoscaler._private.constants import (
     AUTOSCALER_HEARTBEAT_TIMEOUT_S,
@@ -125,7 +123,6 @@ class NonTerminatedNodes:
         # All non-terminated nodes
         self.all_node_ids = provider.non_terminated_nodes({})
 
-        print("all nodes %s"%(self.all_node_ids))
         # Managed worker nodes (node kind "worker"):
         self.worker_ids: List[NodeID] = []
         # The head node (node kind "head")
@@ -136,10 +133,8 @@ class NonTerminatedNodes:
             if node_kind == NODE_KIND_WORKER:
                 self.worker_ids.append(node)
             elif node_kind == NODE_KIND_HEAD:
-                print("Found head %s"%(node))
                 self.head_id = node
 
-        print("Found workers %s"%(self.worker_ids))
         # Note: For typical use-cases, self.all_node_ids == self.worker_ids +
         # [self.head_id]. The difference being in the case of unmanaged nodes.
 
@@ -189,9 +184,7 @@ class StandardAutoscaler:
     StandardAutoscaler is also used to bootstrap clusters (by adding workers
     until the cluster size that can handle the resource demand is met).
     """
-    
-    worker_nums = 1
-    update_times = 1
+
     def __init__(
         self,
         # TODO(ekl): require config reader to be a callable always.
@@ -231,7 +224,6 @@ class StandardAutoscaler:
                 request to the GCS. Used to drain nodes before termination.
         """
 
-        print("Standard autoscalar")
         if isinstance(config_reader, str):
             # Auto wrap with file reader.
             def read_fn():
@@ -423,60 +415,51 @@ class StandardAutoscaler:
         self.prom_metrics.running_workers.set(num_workers)
 
         # Remove from LoadMetrics the ips unknown to the NodeProvider.
-        # self.load_metrics.prune_active_ips(
-        #     active_ips=[
-        #         self.provider.internal_ip(node_id)
-        #         for node_id in self.non_terminated_nodes.all_node_ids
-        #     ]
-        # )
+        self.load_metrics.prune_active_ips(
+            active_ips=[
+                self.provider.internal_ip(node_id)
+                for node_id in self.non_terminated_nodes.all_node_ids
+            ]
+        )
 
         # Update status strings
         if AUTOSCALER_STATUS_LOG:
             logger.info(self.info_string())
         legacy_log_info_string(self, self.non_terminated_nodes.worker_ids)
 
-        # if not self.provider.is_readonly():
-        #     self.terminate_nodes_to_enforce_config_constraints(now)
+        if not self.provider.is_readonly():
+            self.terminate_nodes_to_enforce_config_constraints(now)
 
-        #     if self.disable_node_updaters:
-        #         # Don't handle unhealthy nodes if the liveness check is disabled.
-        #         # self.worker_liveness_check is True by default.
-        #         if self.worker_liveness_check:
-        #             self.terminate_unhealthy_nodes(now)
-        #     else:
-        #         self.process_completed_updates()
-        #         self.update_nodes()
-        #         # Don't handle unhealthy nodes if the liveness check is disabled.
-        #         # self.worker_liveness_check is True by default.
-        #         if self.worker_liveness_check:
-        #             self.attempt_to_recover_unhealthy_nodes(now)
-        #         self.set_prometheus_updater_data()
+            if self.disable_node_updaters:
+                # Don't handle unhealthy nodes if the liveness check is disabled.
+                # self.worker_liveness_check is True by default.
+                if self.worker_liveness_check:
+                    self.terminate_unhealthy_nodes(now)
+            else:
+                self.process_completed_updates()
+                self.update_nodes()
+                # Don't handle unhealthy nodes if the liveness check is disabled.
+                # self.worker_liveness_check is True by default.
+                if self.worker_liveness_check:
+                    self.attempt_to_recover_unhealthy_nodes(now)
+                self.set_prometheus_updater_data()
 
         # Dict[NodeType, int], List[ResourceDict]
-        # to_launch, unfulfilled = self.resource_demand_scheduler.get_nodes_to_launch(
-        #     self.non_terminated_nodes.all_node_ids,
-        #     self.pending_launches.breakdown(),
-        #     self.load_metrics.get_resource_demand_vector(),
-        #     self.load_metrics.get_resource_utilization(),
-        #     self.load_metrics.get_pending_placement_groups(),
-        #     self.load_metrics.get_static_node_resources_by_ip(),
-        #     ensure_min_cluster_size=self.load_metrics.get_resource_requests(),
-        #     node_availability_summary=self.node_provider_availability_tracker.summary(),
-        # )
-        # self._report_pending_infeasible(unfulfilled)
+        to_launch, unfulfilled = self.resource_demand_scheduler.get_nodes_to_launch(
+            self.non_terminated_nodes.all_node_ids,
+            self.pending_launches.breakdown(),
+            self.load_metrics.get_resource_demand_vector(),
+            self.load_metrics.get_resource_utilization(),
+            self.load_metrics.get_pending_placement_groups(),
+            self.load_metrics.get_static_node_resources_by_ip(),
+            ensure_min_cluster_size=self.load_metrics.get_resource_requests(),
+            node_availability_summary=self.node_provider_availability_tracker.summary(),
+        )
+        self._report_pending_infeasible(unfulfilled)
 
-        #if self.update_times == 1:
-        self.update_nodes()
-
-        #    self.update_times = 0
-        
-        to_launch = {NODE_KIND_WORKER: self.worker_nums}
-        unfulfilled = 2
-        print("To launch %s"%(to_launch))
         if not self.provider.is_readonly():
             self.launch_required_nodes(to_launch)
-            
-        self.worker_nums = 0
+
         # Execute optional end-of-update logic.
         # Keep this method call at the end of autoscaler._update().
         self.provider.post_process()
@@ -488,8 +471,7 @@ class StandardAutoscaler:
             f"The autoscaler took {round(update_time, 3)}"
             " seconds to complete the update iteration."
         )
-
-        #self.prom_metrics.update_time.observe(update_time)
+        self.prom_metrics.update_time.observe(update_time)
 
     def terminate_nodes_to_enforce_config_constraints(self, now: float):
         """Terminates nodes to enforce constraints defined by the autoscaling
@@ -1036,11 +1018,11 @@ class StandardAutoscaler:
         return KeepOrTerminate.decide_later, None
 
     def _node_resources(self, node_id):
-        # node_type = self.provider.node_tags(node_id).get(TAG_RAY_USER_NODE_TYPE)
-        # if self.available_node_types:
-        #     return self.available_node_types.get(node_type, {}).get("resources", {})
-        # else:
-        return {}
+        node_type = self.provider.node_tags(node_id).get(TAG_RAY_USER_NODE_TYPE)
+        if self.available_node_types:
+            return self.available_node_types.get(node_type, {}).get("resources", {})
+        else:
+            return {}
 
     def reset(self, errors_fatal=False):
         sync_continuously = False
@@ -1135,7 +1117,6 @@ class StandardAutoscaler:
                 logger.exception("StandardAutoscaler: Error parsing config.")
 
     def launch_config_ok(self, node_id):
-        return False
         if self.disable_launch_config_check:
             return True
         node_tags = self.provider.node_tags(node_id)
@@ -1227,7 +1208,7 @@ class StandardAutoscaler:
     def attempt_to_recover_unhealthy_nodes(self, now):
         for node_id in self.non_terminated_nodes.worker_ids:
             self.recover_if_needed(node_id, now)
-    
+
     def recover_if_needed(self, node_id, now):
         if not self.can_update(node_id):
             return
@@ -1300,33 +1281,32 @@ class StandardAutoscaler:
         if "docker" not in self.config:
             return {}
         docker_config = copy.deepcopy(self.config.get("docker", {}))
-        # node_specific_docker = self._get_node_type_specific_fields(node_id, "docker")
-        # docker_config.update(node_specific_docker)
+        node_specific_docker = self._get_node_type_specific_fields(node_id, "docker")
+        docker_config.update(node_specific_docker)
         return docker_config
 
     def should_update(self, node_id):
         if not self.can_update(node_id):
             return UpdateInstructions(None, None, None, None)  # no update
 
-        # status = self.provider.node_tags(node_id).get(TAG_RAY_NODE_STATUS)
-        # if status == STATUS_UP_TO_DATE and self.files_up_to_date(node_id):
-        #     return UpdateInstructions(None, None, None, None)  # no update
+        status = self.provider.node_tags(node_id).get(TAG_RAY_NODE_STATUS)
+        if status == STATUS_UP_TO_DATE and self.files_up_to_date(node_id):
+            return UpdateInstructions(None, None, None, None)  # no update
 
-        # successful_updated = self.num_successful_updates.get(node_id, 0) > 0
-        # if successful_updated and self.config.get("restart_only", False):
-        #     setup_commands = []
-        #     ray_start_commands = self.config["worker_start_ray_commands"]
-        # elif successful_updated and self.config.get("no_restart", False):
-        #     setup_commands = self._get_node_type_specific_fields(
-        #         node_id, "worker_setup_commands"
-        #     )
-        #     ray_start_commands = []
-        # else:
-        #     setup_commands = self._get_node_type_specific_fields(
-        #         node_id, "worker_setup_commands"
-        #     )
-        ray_start_commands = self.config["worker_start_ray_commands"]
-        setup_commands = self.config["setup_commands"]
+        successful_updated = self.num_successful_updates.get(node_id, 0) > 0
+        if successful_updated and self.config.get("restart_only", False):
+            setup_commands = []
+            ray_start_commands = self.config["worker_start_ray_commands"]
+        elif successful_updated and self.config.get("no_restart", False):
+            setup_commands = self._get_node_type_specific_fields(
+                node_id, "worker_setup_commands"
+            )
+            ray_start_commands = []
+        else:
+            setup_commands = self._get_node_type_specific_fields(
+                node_id, "worker_setup_commands"
+            )
+            ray_start_commands = self.config["worker_start_ray_commands"]
 
         docker_config = self._get_node_specific_docker_config(node_id)
         return UpdateInstructions(
@@ -1342,11 +1322,10 @@ class StandardAutoscaler:
         logger.info(
             f"Creating new (spawn_updater) updater thread for node" f" {node_id}."
         )
-        ip = self.provider.external_ip(node_id)
-        #node_type = self._get_node_type(node_id)
-        #self.node_tracker.track(node_id, ip, node_type)
-        print("non terminated head %s"%(self.non_terminated_nodes.head_id))
-        head_node_ip = self.provider.external_ip(self.non_terminated_nodes.head_id)
+        ip = self.provider.internal_ip(node_id)
+        node_type = self._get_node_type(node_id)
+        self.node_tracker.track(node_id, ip, node_type)
+        head_node_ip = self.provider.internal_ip(self.non_terminated_nodes.head_id)
         updater = NodeUpdaterThread(
             node_id=node_id,
             provider_config=self.config["provider"],
@@ -1369,45 +1348,26 @@ class StandardAutoscaler:
                 "rsync_filter": self.config.get("rsync_filter"),
             },
             process_runner=self.process_runner,
-            use_internal_ip=False,
+            use_internal_ip=True,
             docker_config=docker_config,
             node_resources=node_resources,
         )
         updater.start()
-        print("Updating self.updater for node %s"%(node_id))
         self.updaters[node_id] = updater
 
-        # Add a tag to signify the node was
-        vm = self.provider.get_vm(node_id)
-        self.provider.attach_tag(vm, "VirtualMachine", "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL")
-
     def can_update(self, node_id):
-
-        if self.provider.does_vm_contain_tag(node_id, "urn:vmomi:InventoryServiceTag:a86c5860-c0e6-42f2-a6b3-8e59a90cf946:GLOBAL"):
-            print("node %s already upated no need to update again"%(node_id))
-            return False
-            
-        print("Can update node: %s"%(node_id))
-        return True
-    
         if self.disable_node_updaters:
-            print("disable_node_updaters node: %s"%(node_id))
             return False
         if node_id in self.updaters:
-            print("updaters node: %s"%(node_id))
             return False
         if not self.launch_config_ok(node_id):
-            print("launch_config_ok node: %s"%(node_id))
             return False
         if self.num_failed_updates.get(node_id, 0) > 0:  # TODO(ekl) retry?
-            print("num_failed_updates node: %s"%(node_id))
             return False
         logger.debug(
             f"{node_id} is not being updated and "
             "passes config check (can_update=True)."
         )
-
-        print("can_update return true node: %s"%(node_id))
         return True
 
     def launch_new_node(self, count: int, node_type: str) -> None:
@@ -1449,8 +1409,6 @@ class StandardAutoscaler:
         Returns:
             AutoscalerSummary: The summary.
         """
-
-        return
         # For type checking, assert that this object has been instantitiated.
         assert self.provider
 
@@ -1534,7 +1492,7 @@ class StandardAutoscaler:
         )
 
     def info_string(self):
-        #lm_summary = self.load_metrics.summary()
-        #autoscaler_summary = self.summary()
-        #assert autoscaler_summary
-        return "testing\n"
+        lm_summary = self.load_metrics.summary()
+        autoscaler_summary = self.summary()
+        assert autoscaler_summary
+        return "\n" + format_info_string(lm_summary, autoscaler_summary)
