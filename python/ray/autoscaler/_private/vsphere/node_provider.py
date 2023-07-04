@@ -106,7 +106,7 @@ class VsphereNodeProvider(NodeProvider):
             self.node_config = copy.deepcopy(node_config)
             freeze_vm = node_config["freeze_vm"]
             self.node_config["library_item"] = freeze_vm.get("library_item")
-            self.node_config["resource_pool"] = freeze_vm.get["resource_pool"]
+            self.node_config["resource_pool"] = freeze_vm.get("resource_pool")
             self.outer_obj = outer_obj
             threading.Thread.__init__(self)
 
