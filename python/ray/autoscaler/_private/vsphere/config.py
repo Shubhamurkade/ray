@@ -69,6 +69,7 @@ def update_library_item_configs(config):
         for node_type in available_node_types:
             if "head" in node_type:
                 available_node_types[node_type]["node_config"]["freeze_vm_library_item"] = freeze_vm_library_item
+                available_node_types[node_type]["node_config"]["freeze_vm_resource_pool"] = worker_node_config["resource_pool"]
                 break
     elif "clone" not in worker_node_config or worker_node_config["clone"] == False:
         if "library_item" not in worker_node_config:
