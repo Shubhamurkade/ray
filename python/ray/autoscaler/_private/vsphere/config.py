@@ -60,7 +60,8 @@ def bootstrap_vsphere(config):
 def update_library_item_configs(config):
     available_node_types = config["available_node_types"]
     worker_node_config = available_node_types["worker"]["node_config"]
-    head_nodde_config = available_node_types["ray.head.default"]["node_config"]
+    head_node_type = config["head_node_type"]
+    head_node_config = available_node_types[head_node_type]["node_config"]
 
     if "clone" in worker_node_config and worker_node_config["clone"] == True:
         if "library_item" not in worker_node_config:
@@ -68,7 +69,7 @@ def update_library_item_configs(config):
 
         freeze_vm_library_item = worker_node_config["library_item"]
         # by default create worker nodes in the head node's resource pool
-        worker_resource_pool = head_nodde_config["resource_pool"]
+        worker_resource_pool = head_node_config["resource_pool"]
         # if different resource pool is provided for worker nodes
         if "resource_pool" in worker_node_config and worker_node_config["resource_pool"]:
             worker_resource_pool = worker_node_config["resource_pool"]
