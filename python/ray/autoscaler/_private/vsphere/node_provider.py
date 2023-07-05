@@ -34,27 +34,16 @@ from com.vmware.content.library_client import Item
 from com.vmware.vcenter.guest_client import CustomizationSpec,\
     CloudConfiguration, CloudinitConfiguration, ConfigurationSpec,\
     GlobalDNSSettings
-from ray.autoscaler._private.vsphere.utils import VmwSdkClient
+from ray.autoscaler._private.vsphere.utils import VmwSdkClient, Constants
 from ray.autoscaler._private.vsphere.config import bootstrap_vsphere
 from ray.autoscaler._private.vsphere.config import (PUBLIC_KEY_PATH, USER_DATA_FILE_PATH)
 from com.vmware.cis.tagging_client import CategoryModel
 import com.vmware.vapi.std.errors_client as ErrorClients
 from pyVmomi import vim
 from pyVim.task import WaitForTask
+from com.vmware.vcenter.vm.hardware_client import Cpu, Memory
 
 logger = logging.getLogger(__name__)
-
-TAG_BATCH_DELAY = 1
-TYPE_OF_RESOURCE = "VirtualMachine"
-NODE_CATEGORY = "ray"
-TAG_CLONE_FROM="ray-clone-from"
-
-# TODO: Dynamically generate frozen VM name. 
-# Reason: There can be multiple ray clusters on vSphere. Each cluster should have it's unique name for
-# frozen VM.
-# Impediment to implement now: The name of frozen VM should be unqiue across all the Ray clusters present 
-# on vSphere and should somehow be passed from the bootstrap machine to the head node.
-FROZEN_VM_NAME = "ray-frozen-vm"
 
 def to_vsphere_format(tags):
     """Convert the Ray node name tag to the vSphere-specific 'Name' tag."""
@@ -168,7 +157,7 @@ class VsphereNodeProvider(NodeProvider):
             
             for vm in vms:
                 vm_id = vm.vm
-                yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm.vm)
+                yn_id = DynamicID(type=Constants.TYPE_OF_RESOURCE, id=vm.vm)
                 
                 matched_tags = {}
                 all_tags = {}
@@ -250,7 +239,7 @@ class VsphereNodeProvider(NodeProvider):
                 # before updating the key with a new value.
                 self.remove_tag_from_vm(key, node_id)
 
-                self.attach_tag(node_id, TYPE_OF_RESOURCE, tag_id=tag_id)
+                self.attach_tag(node_id, Constants.TYPE_OF_RESOURCE, tag_id=tag_id)
 
     def create_node(self, node_config, tags, count) -> Dict[str, Any]:
         """Creates instances.
@@ -282,7 +271,7 @@ class VsphereNodeProvider(NodeProvider):
                     break
                 
                 vm_id = vm.name
-                yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm.vm)
+                yn_id = DynamicID(type=Constants.TYPE_OF_RESOURCE, id=vm.vm)
                 filter_matched_count = 0
                 for tag_id in self.vsphere_automation_sdk_client.tagging.TagAssociation.list_attached_tags(yn_id):
                     vsphere_vm_tag = self.vsphere_automation_sdk_client.tagging.Tag.get(tag_id=tag_id).name
@@ -538,7 +527,7 @@ class VsphereNodeProvider(NodeProvider):
     # We'll need to delete the older tag node-status:initializing first before creating
     # node-status:finished
     def remove_tag_from_vm(self, tag_key_to_remove, vm_id):
-        yn_id = DynamicID(type=TYPE_OF_RESOURCE, id=vm_id)
+        yn_id = DynamicID(type=Constants.TYPE_OF_RESOURCE, id=vm_id)
 
         # List all the tags present on the VM.
         for tag_id in self.vsphere_automation_sdk_client.tagging.TagAssociation.list_attached_tags(yn_id):
@@ -759,14 +748,14 @@ class VsphereNodeProvider(NodeProvider):
 
     def get_category(self):
         for id in self.vsphere_automation_sdk_client.tagging.Category.list():
-            if self.vsphere_automation_sdk_client.tagging.Category.get(id).name == NODE_CATEGORY:
+            if self.vsphere_automation_sdk_client.tagging.Category.get(id).name == Constants.NODE_CATEGORY:
                 return id
         return None
 
     def create_category(self):
         # Create RAY_NODE category. This category is associated with VMs and supports multiple tags e.g. "Ray-Head-Node, Ray-Worker-Node-1 etc."
-        cli_logger.info(f'Creating {NODE_CATEGORY} category')
-        category_spec = self.vsphere_automation_sdk_client.tagging.Category.CreateSpec(name=NODE_CATEGORY, 
+        cli_logger.info(f'Creating {Constants.NODE_CATEGORY} category')
+        category_spec = self.vsphere_automation_sdk_client.tagging.Category.CreateSpec(name=Constants.NODE_CATEGORY, 
                                        description="Identifies Ray head node and worker nodes", 
                                        cardinality=CategoryModel.Cardinality.MULTIPLE,
                                        associable_types=set())
