@@ -160,15 +160,17 @@ The following steps can be followed to build Ray for vSphere support:
 - To test the changes to the Ray modules that you have modified, run the following command from the repository root: ``python python/ray/setup-dev.py``: 
   
   - You can additionally skip the prompts for the modules that haven't been modified by using the ``--skip`` parameter.
-  - Most of the times, as part of vSphere support on Ray, we modify `scripts`_ and `autoscaler`_ modules so a sample command would be: ``python/ray/setup-dev.py --skip rllib air tune train cloudpickle data internal tests experimental util workflow dag widgets cluster_utils.py _private dashboard -y``
+  - Most of the times, as part of vSphere support on Ray, we modify `scripts`_ and `autoscaler`_ modules so a sample command would be: ``python/ray/setup-dev.py --skip rllib air tune train cloudpickle data internal tests experimental util workflow dag widgets cluster_utils.py _private dashboard scripts -y``
 
 .. _`scripts`: python/ray/scripts
 .. _`autoscaler`: python/ray/autoscaler
 
 Deploying Ray on vSphere
 --------
-- Create an input manifest file taking the following sample file as a reference. `Sample input manifest`_
-- Add the following command in ``setup_commands`` section to checkout your dev branch on the head node: ``git -C ./ray checkout <branch-name>``
+- Build docker image which will be used on the Ray nodes: ``sh`` `build-push-ray-vsphere-docker-image.sh`_ ``<username>``
+- Create an input manifest file taking the following sample file as a reference: `Sample input manifest`_. 
+- Add ``harbor-repo.vmware.com/ray/ray-on-vsphere:<username>`` image that we built in the previous step to the ``image:`` parameter in the manifest file.
 - Run ``ray up <manifest-file>`` command.
 
 .. _`Sample input manifest`: https://confluence.eng.vmware.com/pages/viewpage.action?pageId=1717515586&preview=/1717515586/1717515750/vsphere.yaml
+.. _`build-push-ray-vsphere-docker-image.sh`: ./build-push-ray-vsphere-docker-image.sh
