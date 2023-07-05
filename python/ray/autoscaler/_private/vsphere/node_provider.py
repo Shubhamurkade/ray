@@ -1,11 +1,11 @@
 import copy
 import logging
 from socket import if_indextoname
-import threading
 import time
 from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List
-from threading import RLock
+from threading import RLock, Thread
+import threading
 
 import ray._private.ray_constants as ray_constants
 
@@ -153,12 +153,14 @@ class VsphereNodeProvider(NodeProvider):
     def bootstrap_config(cluster_config):
         return bootstrap_vsphere(cluster_config)
 
+    # PROT-84: For vSphere non_terminated nodes are:
+    #   1. Nodes in creating state.
+    #   2. Nodes already created and powered on.
     def non_terminated_nodes(self, tag_filters):
         with self.lock:
             nodes = []
-            # Get all POWERED_ON VMs
             cli_logger.info('Getting non terminated nodes...')
-            vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(power_states={HardPower.State.POWERED_ON}))
+            vms = self.vsphere_automation_sdk_client.vcenter.VM.list()
             cli_logger.info(f'Got {len(vms)} non terminated nodes.')
             filters = tag_filters.copy()
             if TAG_RAY_CLUSTER_NAME not in tag_filters:
@@ -186,11 +188,16 @@ class VsphereNodeProvider(NodeProvider):
                 self.tag_cache[vm_id] = all_tags
 
                 if len(matched_tags) == len(filters):
-                    # refresh cached_nodes with latest information e.g external ip 
-                    if vm_id in self.cached_nodes:
-                        del self.cached_nodes[vm_id]
-                    self.cached_nodes[vm_id] = vm
-                    nodes.append(vm_id)
+
+                    power_status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
+
+                    # Return VMs in powered-on and creating state
+                    if power_status.state == HardPower.State.POWERED_OFF and all_tags[Constants.VSPHERE_NODE_STATUS] == Constants.VsphereNodeStatus.CREATING.value or power_status.state == HardPower.State.POWERED_ON:
+                        nodes.append(vm_id)
+                        # refresh cached_nodes with latest information e.g external ip 
+                        if vm_id in self.cached_nodes:
+                            del self.cached_nodes[vm_id]
+                            self.cached_nodes[vm_id] = vm
             
             cli_logger.info(f'Nodes are {nodes}') 
             return nodes
@@ -312,9 +319,9 @@ class VsphereNodeProvider(NodeProvider):
         all_created_nodes = reused_nodes_dict
         all_created_nodes.update(created_nodes_dict)
 
-        # Set tags on the nodes that were created/reused
-        for _, vm in all_created_nodes.items():
-            self.set_node_tags(vm.vm, filters)
+        # Set tags on the nodes that were reused
+        for node_id in reuse_node_ids:
+            self.set_node_tags(node_id, filters)
 
         return all_created_nodes        
 
@@ -552,9 +559,17 @@ class VsphereNodeProvider(NodeProvider):
             cli_logger.info("waiting for power on of frozen VM")
             time.sleep(interval)
     
-    def find_vm_to_clone_from(self):
-        
-        vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set([FROZEN_VM_NAME])))
+    def find_vm_to_clone_from(self, tags):
+
+        ################# PROT-83: Frozen VM should have unique name ###################
+        # We can fetch the frozen VM name from the tag present on the head node or we can
+        # build it as below. We prefer the below approach over fetching the tag from head
+        # node as this is faster.
+        frozen_vm_target_name = tags[TAG_RAY_NODE_NAME].split('-')
+        frozen_vm_target_name = Constants.FROZEN_VM_FORMAT.format(frozen_vm_target_name[0], frozen_vm_target_name[1])
+        ################################################################################
+
+        vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set([frozen_vm_target_name])))
 
         cli_logger.info("VM to clone from {}".format(vms))
 
@@ -639,14 +654,44 @@ class VsphereNodeProvider(NodeProvider):
         vm = self.get_vm(vm_id)
 
         return vm
-    
+
+    # Fixes PROT-84
+    # This function is used to tag VMs as soon as they show up on vCenter.
+    # If an user executes ray down when the OVFs are still getting deployed, we should still be 
+    # able to identify the VMs in creating state. Hence, we tag the VMs as soon as they show up 
+    # the vCenter. With this approach we can use the tags to find out VMs both in deploying and
+    # deployed states.
+    def set_tag_by_vm_name(self, vm_name, tags):
+        names = set([vm_name])
+        vms = []
+
+        start = time.time()
+        timeout = 120
+
+        while len(vms) == 0 and time.time() - start < timeout:
+            vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=names))
+
+        if len(vms) == 0:
+            raise RuntimeError('VM {} could not be found.'.format(vm_name))
+
+        vm_id = vms[0].vm
+
+        self.set_node_tags(vm_id, tags)
+
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
         # create a frozen VM if not already present
+        frozen_vm_thread = None
+        frozen_vm_target_name = None
+        if "freeze_vm" in node_config:
 
-        if "freeze_vm_library_item" in node_config and node_config["freeze_vm_library_item"] is not None:
-            frozen_vm_thread = self.FreezeVMThread(node_config, self)
+            ################# PROT-83: Frozen VM should have unique name ###################
+            frozen_vm_target_name = tags[TAG_RAY_NODE_NAME].split('-')
+            frozen_vm_target_name = Constants.FROZEN_VM_FORMAT.format(frozen_vm_target_name[0], frozen_vm_target_name[1])
+            ################################################################################
+
+            frozen_vm_thread = self.FreezeVMThread(frozen_vm_target_name, node_config, self)
             frozen_vm_thread.start()
 
         for _ in range(count):
@@ -658,40 +703,39 @@ class VsphereNodeProvider(NodeProvider):
 
             vm = None
 
-            # Check if clone_from config is present and that it contains a valid VM
             try:
-                vm = self.find_vm_to_clone_from() 
+                vm = self.find_vm_to_clone_from(tags) 
 
             except ValueError:
                 cli_logger.info("clone_from config not present so creating VM from OVF.")
 
+            # PROT-83: The frozen VM name is stored as a tag on the head node
+            if frozen_vm_target_name is not None:
+                tags[Constants.RAY_HEAD_FROZEN_VM_TAG] = frozen_vm_target_name
+
+            # Set vsphere-node-status tag to creating for the node.
+            tags[Constants.VSPHERE_NODE_STATUS] = Constants.VsphereNodeStatus.CREATING.value
+
+            tag_node_thread = self.ThreadWithReturnValue(target=self.set_tag_by_vm_name, args=(vm_name, tags))
+            tag_node_thread.start()
+
             # Clone from existing worker if we got a valid VM from clone_from config.
             if "clone" in node_config and node_config["clone"] == True and vm != None:
-                cli_logger.info("Clone the worker from {}".format(vm))
-                self.wait_until_power_on(vm.vm, 240, 3)
-
                 vm = self.create_instant_clone_node(vm, vm_name)
             else: 
                 vm = self.create_ovf_node(node_config, vm_name)
-
-            vm_id = vm.vm
-            # Power on the created VM. If it was InstantClone then we would have
-            # powered it off after creation.
-            status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
-            if status != HardPower.Info(state=HardPower.State.POWERED_ON):
-                cli_logger.info("Powering on VM")
-                self.vsphere_automation_sdk_client.vcenter.vm.Power.start(vm_id)
-                cli_logger.info('vm.Power.start({})'.format(vm_id))
-            ### TO assign a tag to a node:
-            ### 1. Create a category e.g RAY_NODE
-            ### 2. Create a tag in the category e.g ray-default-head
-            ### 3. Assign the tag to an object
-            category_id = self.get_category()
-            if not category_id:
-                category_id = self.create_category()
             
+            tag_node_thread.join()
+
+            # Now that the VM got created, set the vsphere-node-status tag to created
+            vsphere_node_created_tag = {Constants.VSPHERE_NODE_STATUS: Constants.VsphereNodeStatus.CREATED.value}
+            self.set_node_tags(vm.vm, vsphere_node_created_tag)
+
             created_nodes_dict[vm_name] = vm
         
+        if frozen_vm_thread is not None:
+            frozen_vm_thread.join()
+
         return created_nodes_dict
 
     def get_tag(self, tag_name, category_id):
@@ -744,21 +788,44 @@ class VsphereNodeProvider(NodeProvider):
             return
         
         status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(node_id)
-        if status != HardPower.Info(state=HardPower.State.POWERED_OFF):
+
+        if status.state != HardPower.State.POWERED_OFF:
             self.vsphere_automation_sdk_client.vcenter.vm.Power.stop(node_id)
             cli_logger.info('vm.Power.stop({})'.format(node_id))
             
         self.vsphere_automation_sdk_client.vcenter.VM.delete(node_id)
         cli_logger.info("Deleted vm {}".format(node_id))
-        self.cached_nodes.pop(node_id)
-        self.tag_cache.pop(node_id)
+
+        # Pop node_id from cached_nodes and tag_cache only if not present
+        if node_id in self.cached_nodes:
+            self.cached_nodes.pop(node_id)
+
+        if node_id in self.tag_cache:
+            self.tag_cache.pop(node_id)
 
     def terminate_nodes(self, node_ids):
         if not node_ids:
             return
-
+        
+        frozen_vm_name = None
         for node_id in node_ids:
+
+            ########## Get frozen VM name from the head node tag #######
+            vm_obj = self.get_vm(node_id)
+
+            if "head" in vm_obj.name:
+                frozen_vm_name = self.node_tags(node_id)[Constants.RAY_HEAD_FROZEN_VM_TAG]
+            ############################################################
+
             self.terminate_node(node_id)
+
+        # PROT-83: If all the nodes got deleted it means the user has executed ray down command so 
+        # delete the frozen VM as well.
+
+        if len(self.non_terminated_nodes({})) == 0:
+            # Get the Frozen VM by name
+            vms  = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set([frozen_vm_name])))
+            self.terminate_node(vms[0].vm)
 
     def _get_node(self, node_id):
         """Refresh and get info for this node, updating the cache."""
