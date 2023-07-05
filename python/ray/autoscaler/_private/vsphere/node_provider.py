@@ -93,19 +93,27 @@ class VsphereNodeProvider(NodeProvider):
     # This class can be used to get return values from the the thread that was launched
     class ThreadWithReturnValue(Thread):
         def __init__(self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None):
-            Thread.__init__(self, group, target, name, args, kwargs, daemon=daemon)
-
+            self.args = args
             self._return = None
+            self.thread_exception = None
+ 
+            Thread.__init__(self, group, target, name, args, kwargs, daemon=daemon)
 
         def run(self):
             if self._target is not None:
-                self._return = self._target(*self._args, **self._kwargs)
-
+                try:
+                    self._return = self._target(*self._args, **self._kwargs)
+                except Exception as e:  
+                    self.thread_exception = e
         def join(self):
             Thread.join(self)
+
+            if self.thread_exception:
+                raise self.thread_exception
+            
             return self._return
         
-    class FreezeVMThread(Thread):
+    class FreezeVMThread(ThreadWithReturnValue):
         def __init__(self, target_name, node_config, outer_obj):
             self.node_config = copy.deepcopy(node_config)
             freeze_vm = node_config["freeze_vm"]
@@ -114,29 +122,27 @@ class VsphereNodeProvider(NodeProvider):
             self.node_config["resources"] = freeze_vm["resources"]
             self.outer_obj = outer_obj
             self.target_name = target_name
+            self.thread_exception = None
             Thread.__init__(self)
 
         def run(self):
-            vm_name = self.target_name
+            try:
+                vm_name = self.target_name
+                vms = self.outer_obj.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set(vm_name)))
 
-            vms = self.outer_obj.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set(vm_name)))
+                # Frozen VM already present so no need to create again
+                if len(vms) > 0:
+                    cli_logger.info("Frozen VM already exists")
+                    return
+                
+                cli_logger.info("Creating frozen VM")
+                self._return = self.outer_obj.create_ovf_node(self.node_config, vm_name)
+            except Exception as e:
+                cli_logger.info("Failed creating frozen VM {}".format(self.target_name))
+                self.thread_exception = e
 
-            # Frozen VM already present so no need to create again
-            if len(vms) > 0:
-                cli_logger.info("Frozen VM already exists")
-                return
-            
-            cli_logger.info("Creating frozen VM")
-            vm = self.outer_obj.create_ovf_node(self.node_config, vm_name)
-
-            vm_id = vm.vm
-            # Power on the created VM. If it was InstantClone then we would have
-            # powered it off after creation.
-            status = self.outer_obj.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
-            if status != HardPower.Info(state=HardPower.State.POWERED_ON):
-                cli_logger.info("Powering on VM")
-                self.outer_obj.vsphere_automation_sdk_client.vcenter.vm.Power.start(vm_id)
-                cli_logger.info('vm.Power.start({})'.format(vm_id))
+        def join(self):
+            return super().join()
 
     @staticmethod
     def bootstrap_config(cluster_config):
@@ -239,6 +245,7 @@ class VsphereNodeProvider(NodeProvider):
                 # before updating the key with a new value.
                 self.remove_tag_from_vm(key, node_id)
 
+                cli_logger.info(f'Attaching tag {tag} to {node_id}')
                 self.attach_tag(node_id, Constants.TYPE_OF_RESOURCE, tag_id=tag_id)
 
     def create_node(self, node_config, tags, count) -> Dict[str, Any]:
@@ -360,7 +367,6 @@ class VsphereNodeProvider(NodeProvider):
     def attach_tag(self, vm_id, resource_type, tag_id):
         dyn_id = DynamicID(type=resource_type, id=vm_id)
         try:
-            cli_logger.info(f'Attaching tag {tag_id} to {vm_id}')
             self.vsphere_automation_sdk_client.tagging.TagAssociation.attach(tag_id, dyn_id)
             cli_logger.info('Tag attached')
         except Exception as e:
@@ -427,7 +433,6 @@ class VsphereNodeProvider(NodeProvider):
         #####################################################################
 
     def create_ovf_node(self, node_config, vm_name_target):
-
         # Find and use the resource pool defined in the manifest file.
         rp_filter_spec = ResourcePool.FilterSpec(names=set([node_config["resource_pool"]]))
         resource_pool_summaries = self.vsphere_automation_sdk_client.vcenter.ResourcePool.list(rp_filter_spec)
@@ -492,7 +497,6 @@ class VsphereNodeProvider(NodeProvider):
             raise ValueError("OVF deployment failed for VM {}, reason: {}".format(vm_name_target), result)
 
         vm_id = result.resource_id.id
-
             
         if "CPU" in node_config["resources"]:
             # Update number of CPUs
@@ -667,14 +671,29 @@ class VsphereNodeProvider(NodeProvider):
 
         self.set_node_tags(vm_id, tags)
 
+    def delete_vm(self, vm_name):
+        vms = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set([vm_name])))
+        
+        if len(vms) > 0:
+            vm_id = vms[0].vm
+            cli_logger.info("Deleting VM {}".format())
+            self.vsphere_automation_sdk_client.vcenter.VM.delete(vm_id)
+
     def _create_node(self, node_config, tags, count):
         created_nodes_dict = {}
 
         # create a frozen VM if not already present
         frozen_vm_thread = None
         frozen_vm_target_name = None
-        if "freeze_vm" in node_config:
 
+        # Threads for creating and tagging VMs
+        create_node_threads = []
+        tag_node_threads = []
+        
+        # freeze_vm config is only present on the head node config. Hence, any code related
+        # to freeze VM executes during the creation of the head node on the bootstrap 
+        # machine
+        if "freeze_vm" in node_config:
             ################# PROT-83: Frozen VM should have unique name ###################
             frozen_vm_target_name = tags[TAG_RAY_NODE_NAME].split('-')
             frozen_vm_target_name = Constants.FROZEN_VM_FORMAT.format(frozen_vm_target_name[0], frozen_vm_target_name[1])
@@ -705,27 +724,47 @@ class VsphereNodeProvider(NodeProvider):
             # Set vsphere-node-status tag to creating for the node.
             tags[Constants.VSPHERE_NODE_STATUS] = Constants.VsphereNodeStatus.CREATING.value
 
-            tag_node_thread = self.ThreadWithReturnValue(target=self.set_tag_by_vm_name, args=(vm_name, tags))
-            tag_node_thread.start()
+            tag_node_threads.append(self.ThreadWithReturnValue(target=self.set_tag_by_vm_name, args=(vm_name, tags)))
 
             # Clone from existing worker if we got a valid VM from clone_from config.
             if "clone" in node_config and node_config["clone"] == True and vm != None:
-                vm = self.create_instant_clone_node(vm, vm_name)
+                create_node_threads.append(self.ThreadWithReturnValue(target=self.create_instant_clone_node, args=(vm, vm_name)))
             else: 
-                vm = self.create_ovf_node(node_config, vm_name)
+                create_node_threads.append(self.ThreadWithReturnValue(target=self.create_ovf_node, args=(node_config, vm_name)))
+    
+        for i in range(0, len(create_node_threads)):
+            # Setting daemon=True allows the main thread to continue execution and terminate
+            # if any of the child threads fail
+            create_node_threads[i].daemon = True
+            create_node_threads[i].start()
+
+            tag_node_threads[i].daemon = True
+            tag_node_threads[i].start()
+
+        try:
+            if frozen_vm_thread is not None:
+                frozen_vm_thread.join()
+
+            for i in range(0, len(create_node_threads)):
+                vm = create_node_threads[i].join()
+                tag_node_threads[i].join()
+                # Now that the VM got created, set the vsphere-node-status tag to created
+                vsphere_node_created_tag = {Constants.VSPHERE_NODE_STATUS: Constants.VsphereNodeStatus.CREATED.value}
+                self.set_node_tags(vm.vm, vsphere_node_created_tag)
+
+                created_nodes_dict[vm_name] = vm
+
+            return created_nodes_dict
+        except Exception as e:
+            # If any failure happens, delete any stale VMs from the vCenter and raise an
+            # exception
+            for i in range(0, len(create_node_threads)):
+                self.delete_vm(create_node_threads[i].args[1])
             
-            tag_node_thread.join()
+            if frozen_vm_target_name:
+                self.delete_vm(frozen_vm_target_name)
 
-            # Now that the VM got created, set the vsphere-node-status tag to created
-            vsphere_node_created_tag = {Constants.VSPHERE_NODE_STATUS: Constants.VsphereNodeStatus.CREATED.value}
-            self.set_node_tags(vm.vm, vsphere_node_created_tag)
-
-            created_nodes_dict[vm_name] = vm
-        
-        if frozen_vm_thread is not None:
-            frozen_vm_thread.join()
-
-        return created_nodes_dict
+            raise RuntimeError("Creating VMs failed exception: {}".format(e))
 
     def get_tag(self, tag_name, category_id):
         for id in self.vsphere_automation_sdk_client.tagging.Tag.list_tags_for_category(category_id):
@@ -803,7 +842,10 @@ class VsphereNodeProvider(NodeProvider):
             vm_obj = self.get_vm(node_id)
 
             if "head" in vm_obj.name:
-                frozen_vm_name = self.node_tags(node_id)[Constants.RAY_HEAD_FROZEN_VM_TAG]
+                head_node_tags = self.node_tags(node_id)
+
+                if Constants.RAY_HEAD_FROZEN_VM_TAG in head_node_tags:
+                    frozen_vm_name = head_node_tags[Constants.RAY_HEAD_FROZEN_VM_TAG]
             ############################################################
 
             self.terminate_node(node_id)
@@ -811,7 +853,8 @@ class VsphereNodeProvider(NodeProvider):
         # PROT-83: If all the nodes got deleted it means the user has executed ray down command so 
         # delete the frozen VM as well.
 
-        if len(self.non_terminated_nodes({})) == 0:
+        # Frozen VM will not be present if the workers were created from OVF files.
+        if len(self.non_terminated_nodes({})) == 0 and frozen_vm_name:
             # Get the Frozen VM by name
             vms  = self.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set([frozen_vm_name])))
             self.terminate_node(vms[0].vm)

@@ -238,8 +238,6 @@ def _run_and_process_output(
         stdin_overwrite = None
 
     # See implementation note #1
-
-    print("before check call")
     if use_login_shells or process_runner != subprocess:
         return process_runner.check_call(
             cmd,
@@ -249,7 +247,6 @@ def _run_and_process_output(
             stderr=stderr_file,
         )
 
-    print("after check call")
     with subprocess.Popen(
         cmd,
         # See implementation note #2
@@ -331,7 +328,6 @@ def run_cmd_redirected(
                        rsync.
     """
     if silent and cli_logger.verbosity < 1:
-        print("before run and process 1")
         return _run_and_process_output(
             cmd,
             process_runner=process_runner,
@@ -340,7 +336,6 @@ def run_cmd_redirected(
             use_login_shells=use_login_shells,
         )
     if not is_output_redirected():
-        print("before run and process 2")
         return _run_and_process_output(
             cmd,
             process_runner=process_runner,
@@ -349,7 +344,6 @@ def run_cmd_redirected(
             use_login_shells=use_login_shells,
         )
     else:
-        print("If not run and process")
         tmpfile_path = os.path.join(
             tempfile.gettempdir(), "ray-up-{}-{}.txt".format(cmd[0], time.time())
         )

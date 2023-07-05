@@ -167,10 +167,12 @@ The following steps can be followed to build Ray for vSphere support:
 
 Deploying Ray on vSphere
 --------
-- Build docker image which will be used on the Ray nodes: ``sh`` `build-push-ray-vsphere-docker-image.sh`_ ``<username>``
 - Create an input manifest file taking the following sample file as a reference: `Sample input manifest`_. 
+- Build docker image which will be used on the Ray nodes: ``sh build-push-ray-vsphere-docker-image.sh <username>``. ``<username>`` is your VMware user-name
+  - Building an image is a fast operation. Hence, this step and the next can be started simultaneously. By the time the image starts to get pulled onto the VMs, the docker image would have been built and pushed.
 - Add ``harbor-repo.vmware.com/ray/ray-on-vsphere:<username>`` image that we built in the previous step to the ``image:`` parameter in the manifest file.
 - Run ``ray up <manifest-file>`` command.
+  - The command uses cached configuration by default. In case of any failures observed, execute ``ray up <manifest-file> --no-config-cache``
 
 .. _`Sample input manifest`: https://confluence.eng.vmware.com/pages/viewpage.action?pageId=1717515586&preview=/1717515586/1717515750/vsphere.yaml
 .. _`build-push-ray-vsphere-docker-image.sh`: ./build-push-ray-vsphere-docker-image.sh

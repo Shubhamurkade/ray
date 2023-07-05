@@ -71,30 +71,32 @@ def update_library_item_configs(config):
     head_node = available_node_types[head_node_type]
     head_node_config = head_node["node_config"]
 
+    # A mandatory constraint enforced by the Ray's YAML validator is to add resources field
+    # for both head and worker nodes. For example, to specify resources for the worker the
+    # user will specify it in 
+    #       worker:
+    #           resources
+    # We copy that resources field into
+    #       worker:
+    #           node_config:
+    #               resources
+    # This enables us to access the field during node creation. The same happens for head node too.
+    worker_node_config["resources"] = worker_node["resources"]
+    head_node_config["resources"] = head_node["resources"]
+    
+    # by default create worker nodes in the head node's resource pool
+    worker_resource_pool = head_node_config["resource_pool"]
+    
+    worker_node_config["resource_pool"] = worker_resource_pool
+    # If different resource pool is provided for worker nodes, use it
+    if "resource_pool" in worker_node_config and worker_node_config["resource_pool"]:
+        worker_resource_pool = worker_node_config["resource_pool"]
+
     if "clone" in worker_node_config and worker_node_config["clone"] == True:
         if "library_item" not in worker_node_config:
             raise ValueError("library_item is mandatory if clone:True is set for worker config")
 
         freeze_vm_library_item = worker_node_config["library_item"]
-        # by default create worker nodes in the head node's resource pool
-        worker_resource_pool = head_node_config["resource_pool"]
-        
-        # Iff different resource pool is provided for worker nodes, use it
-        if "resource_pool" in worker_node_config and worker_node_config["resource_pool"]:
-            worker_resource_pool = worker_node_config["resource_pool"]
-        
-        # A mandatory constraint enforced by the Ray's YAML validator is to add resources field
-        # for both head and worker nodes. For example, to specify resources for the worker the
-        # user will specify it in 
-        #       worker:
-        #           resources
-        # We copy that resources field into
-        #       worker:
-        #           node_config:
-        #               resources
-        # This enables us to access the field during node creation. The same happens for head node too.
-        worker_node_config["resources"] = worker_node["resources"]
-        head_node_config["resources"] = head_node["resources"]
 
         # Create a new object with properties to be used while creating the freeze VM.
         freeze_vm = {
