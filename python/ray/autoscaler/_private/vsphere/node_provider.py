@@ -101,17 +101,34 @@ class VsphereNodeProvider(NodeProvider):
         # excessive DescribeInstances requests.
         self.cached_nodes : Dict[str, VM] = {}
 
-    class FreezeVMThread(threading.Thread):
-        def __init__(self, node_config, outer_obj):
-            self.node_config = copy.deepcopy(node_config)
-            freeze_vm = node_config["freeze_vm"]
-            self.node_config["library_item"] = freeze_vm.get("library_item")
-            self.node_config["resource_pool"] = freeze_vm.get("resource_pool")
-            self.outer_obj = outer_obj
-            threading.Thread.__init__(self)
+    # This class can be used to get return values from the the thread that was launched
+    class ThreadWithReturnValue(Thread):
+        def __init__(self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None):
+            Thread.__init__(self, group, target, name, args, kwargs, daemon=daemon)
+
+            self._return = None
 
         def run(self):
-            vm_name = FROZEN_VM_NAME
+            if self._target is not None:
+                self._return = self._target(*self._args, **self._kwargs)
+
+        def join(self):
+            Thread.join(self)
+            return self._return
+        
+    class FreezeVMThread(Thread):
+        def __init__(self, target_name, node_config, outer_obj):
+            self.node_config = copy.deepcopy(node_config)
+            freeze_vm = node_config["freeze_vm"]
+            self.node_config["library_item"] = freeze_vm["library_item"]
+            self.node_config["resource_pool"] = freeze_vm["resource_pool"]
+            self.node_config["resources"] = freeze_vm["resources"]
+            self.outer_obj = outer_obj
+            self.target_name = target_name
+            Thread.__init__(self)
+
+        def run(self):
+            vm_name = self.target_name
 
             vms = self.outer_obj.vsphere_automation_sdk_client.vcenter.VM.list(VM.FilterSpec(names=set(vm_name)))
 
@@ -477,13 +494,36 @@ class VsphereNodeProvider(NodeProvider):
                 cli_logger.print('OVF error: {}'.format(result))
             
             raise ValueError("OVF deployment failed for VM {}, reason: {}".format(vm_name_target), result)
-        
-        # Get the created vm object
-        vm = self.get_vm(result.resource_id.id)
+
+        vm_id = result.resource_id.id
+
+            
+        if "CPU" in node_config["resources"]:
+            # Update number of CPUs
+            update_spec = Cpu.UpdateSpec(count=node_config["resources"]["CPU"])
+            
+            cli_logger.info('vm.hardware.Cpu.update({}, {})'.format(vm_id, update_spec))
+            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Cpu.update(vm_id, update_spec)
+
+        if "Memory" in node_config["resources"]:
+            # Update Memory
+            update_spec = Memory.UpdateSpec(size_mib=node_config["resources"]["Memory"])
+            
+            cli_logger.info('vm.hardware.Memory.update({}, {})'.format(vm_id, update_spec))
+            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Memory.update(vm_id, update_spec)
 
         # Inject a new user with public key into the VM
-        self.set_cloudinit_userdata(vm.vm)
+        self.set_cloudinit_userdata(vm_id)
 
+        status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
+        if status.state != HardPower.State.POWERED_ON:
+            cli_logger.info("Powering on VM")
+            self.vsphere_automation_sdk_client.vcenter.vm.Power.start(vm_id)
+            cli_logger.info('vm.Power.start({})'.format(vm_id))
+
+        # Get the created vm object
+        vm = self.get_vm(result.resource_id.id)
+        
         return vm
 
     # Example: If a tag called node-status:initializing is present on the VM.

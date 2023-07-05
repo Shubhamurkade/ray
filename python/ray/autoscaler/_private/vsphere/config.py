@@ -59,9 +59,17 @@ def bootstrap_vsphere(config):
 #           Remaining workers are created from the created frozen VM
 def update_library_item_configs(config):
     available_node_types = config["available_node_types"]
-    worker_node_config = available_node_types["worker"]["node_config"]
+
+    # Fetch worker: field from the YAML file
+    worker_node = available_node_types["worker"]
+    worker_node_config = worker_node["node_config"]
+
+    # Fetch the head node field name from head_node_type field.
     head_node_type = config["head_node_type"]
-    head_node_config = available_node_types[head_node_type]["node_config"]
+
+    # Use head_node_type field's value to fetch the head node field
+    head_node = available_node_types[head_node_type]
+    head_node_config = head_node["node_config"]
 
     if "clone" in worker_node_config and worker_node_config["clone"] == True:
         if "library_item" not in worker_node_config:
@@ -70,25 +78,38 @@ def update_library_item_configs(config):
         freeze_vm_library_item = worker_node_config["library_item"]
         # by default create worker nodes in the head node's resource pool
         worker_resource_pool = head_node_config["resource_pool"]
-        # if different resource pool is provided for worker nodes
+        
+        # Iff different resource pool is provided for worker nodes, use it
         if "resource_pool" in worker_node_config and worker_node_config["resource_pool"]:
             worker_resource_pool = worker_node_config["resource_pool"]
         
+        # A mandatory constraint enforced by the Ray's YAML validator is to add resources field
+        # for both head and worker nodes. For example, to specify resources for the worker the
+        # user will specify it in 
+        #       worker:
+        #           resources
+        # We copy that resources field into
+        #       worker:
+        #           node_config:
+        #               resources
+        # This enables us to access the field during node creation. The same happens for head node too.
+        worker_node_config["resources"] = worker_node["resources"]
+        head_node_config["resources"] = head_node["resources"]
+
+        # Create a new object with properties to be used while creating the freeze VM.
         freeze_vm = {
             "library_item": freeze_vm_library_item,
-            "resource_pool": worker_resource_pool
+            "resource_pool": worker_resource_pool,
+            "resources": worker_node_config["resources"]
         }
-        for node_type in available_node_types:
-            if "head" in node_type:
-                available_node_types[node_type]["node_config"]["freeze_vm"] = freeze_vm
-                break
+        
+        # Add the newly created feeze_vm object to hea_node config
+        head_node_config["freeze_vm"] = freeze_vm
+        
     elif "clone" not in worker_node_config or worker_node_config["clone"] == False:
         if "library_item" not in worker_node_config:
-            for node_type in available_node_types:
-                if "head" in node_type:
-                    worker_node_config["library_item"] = available_node_types[node_type]["node_config"]["library_item"]
-                    break
-
+            worker_node_config["library_item"] = head_node_config["library_item"]
+                      
 def create_key_pair():
     
     # If the files already exists, we don't want to create new keys.
