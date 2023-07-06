@@ -105,7 +105,7 @@ def update_library_item_configs(config):
             "resources": worker_node_config["resources"]
         }
         
-        # Add the newly created feeze_vm object to hea_node config
+        # Add the newly created feeze_vm object to head_node config
         head_node_config["freeze_vm"] = freeze_vm
         
     elif "clone" not in worker_node_config or worker_node_config["clone"] == False:
