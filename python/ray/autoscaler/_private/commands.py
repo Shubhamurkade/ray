@@ -645,7 +645,7 @@ def get_or_create_head_node(
         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
     }
     nodes = provider.non_terminated_nodes(head_node_tags)
-    cli_logger.print("Nodes %s"%(nodes))
+    cli_logger.print("Nodes %s" % (nodes))
     if len(nodes) > 0:
         head_node = nodes[0]
     else:
@@ -709,7 +709,7 @@ def get_or_create_head_node(
         head_node, launch_hash, head_node_type, provider
     )
 
-    cli_logger.print("Head node before creating head %s"%(head_node))
+    cli_logger.print("Head node before creating head %s" % (head_node))
     if creating_new_head:
         with cli_logger.group("Acquiring an up-to-date head node"):
             global_event_system.execute_callback(
@@ -881,7 +881,6 @@ def _should_create_new_head(
         # No head node exists, need to create it.
         return True
 
-    return False
     # Pull existing head's data.
     head_tags = provider.node_tags(head_node_id)
     current_launch_hash = head_tags.get(TAG_RAY_LAUNCH_CONFIG)
@@ -955,13 +954,10 @@ def _set_up_config_for_head_node(
 
     # Now inject the rewritten config and SSH key into the head node
     remote_config_file = tempfile.NamedTemporaryFile("w", prefix="ray-bootstrap-")
-    print("remote config: %s"%(remote_config_file.name))
 
     json_dumps = json.dumps(remote_config)
 
-    print("json dumps: %s"%(json_dumps))
     file_create = remote_config_file.write(json_dumps)
-    print("return value: %s"%(file_create))
     remote_config_file.flush()
     config["file_mounts"].update(
         {"~/ray_bootstrap_config.yaml": remote_config_file.name}

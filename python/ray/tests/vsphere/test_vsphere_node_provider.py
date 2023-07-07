@@ -60,8 +60,9 @@ def test_non_terminated_nodes_returns_node():
     mock_vm1.vm = "test-1"
 
     node_provider.vsphere_client.vcenter.VM.list.return_value = [mock_vm1]
-    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.\
-        return_value = ["test_tag_id "]
+    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.return_value = [
+        "test_tag_id "
+    ]
 
     mock_tag = MagicMock()
     mock_tag.name = "ray-cluster-name:test"
@@ -94,8 +95,9 @@ def test_non_terminated_nodes_returns_no_node_if_tag_not_matched():
     mock_vm1.vm = "test-1"
 
     node_provider.vsphere_client.vcenter.VM.list.return_value = [mock_vm1]
-    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.\
-        return_value = ["test_tag_id "]
+    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.return_value = [
+        "test_tag_id "
+    ]
 
     mock_tag = MagicMock()
     mock_tag.name = "ray-cluster-name:default"
@@ -213,8 +215,9 @@ def test_create_nodes():
     mock_vm2.vm = "node-2"
 
     node_provider.vsphere_client.vcenter.VM.list.return_value = [mock_vm1, mock_vm2]
-    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.\
-        return_value = ["test_tag_id1"]
+    node_provider.vsphere_client.tagging.TagAssociation.list_attached_tags.return_value = [
+        "test_tag_id1"
+    ]
 
     mock_tag = MagicMock()
     mock_tag.name = "ray-cluster-name:test"
@@ -635,6 +638,7 @@ def test__get_node():
     vm = node_provider._get_node("node_id_1")
     # assert
     assert vm is None
+
 
 if __name__ == "__main__":
     import sys

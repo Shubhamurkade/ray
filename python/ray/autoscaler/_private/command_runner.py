@@ -71,7 +71,7 @@ def set_using_login_shells(val: bool):
     Sometimes this can be significant since e.g. `pip install` prints
     hundreds of progress bar lines when downloading.
 
-    Login shells have the benefit  of working very close to how a proper bash
+    Login shells have the benefit of working very close to how a proper bash
     session does, regarding how scripts execute and how the environment is
     setup. This is also how all commands were ran in the past. The only reason
     to use login shells over non-interactive shells is if you need some weird
@@ -276,11 +276,9 @@ class SSHCommandRunner(CommandRunnerInterface):
                     use_login_shells=is_using_login_shells(),
                 )
             else:
-                print("Process out final command: %s"%(final_cmd))
                 return self.process_runner.check_output(final_cmd)
         except subprocess.CalledProcessError as e:
             joined_cmd = " ".join(final_cmd)
-            print("joined cmd failed; %s"%(joined_cmd))
             if not is_using_login_shells():
                 raise ProcessRunnerError(
                     "Command failed",
@@ -317,7 +315,6 @@ class SSHCommandRunner(CommandRunnerInterface):
         shutdown_after_run=False,
         silent=False,
     ):
-        print("run ssh command runner")
         if shutdown_after_run:
             cmd += "; sudo shutdown -h now"
 
@@ -359,8 +356,6 @@ class SSHCommandRunner(CommandRunnerInterface):
             + ssh_options.to_ssh_options_list(timeout=timeout)
             + ["{}@{}".format(self.ssh_user, self.ssh_ip)]
         )
-
-        print("final ssh cmd: %s"%(final_cmd))
         if cmd:
             if environment_variables:
                 cmd = _with_environment_variables(cmd, environment_variables)
@@ -374,8 +369,6 @@ class SSHCommandRunner(CommandRunnerInterface):
             final_cmd.append("while true; do sleep 86400; done")
 
         cli_logger.verbose("Running `{}`", cf.bold(cmd))
-
-        print("Running `{}`", cf.bold(cmd))
         with cli_logger.indented():
             cli_logger.very_verbose(
                 "Full command is `{}`", cf.bold(" ".join(final_cmd))
@@ -416,7 +409,6 @@ class SSHCommandRunner(CommandRunnerInterface):
             ),
         ]
         command += ["-avz"]
-        print("run_rsync_up options %s"%(options))
         command += self._create_rsync_filter_args(options=options)
         command += [source, "{}@{}:{}".format(self.ssh_user, self.ssh_ip, target)]
         cli_logger.verbose("Running `{}`", cf.bold(" ".join(command)))
@@ -521,7 +513,6 @@ class DockerCommandRunner(CommandRunnerInterface):
             silent=is_rsync_silent(),
         )
 
-        print("run_rsync_up in run_rsync_up")
         self.ssh_command_runner.run_rsync_up(source, host_destination, options=options)
         if self._check_container_status() and not options.get(
             "docker_mount_if_possible", False
@@ -719,7 +710,7 @@ class DockerCommandRunner(CommandRunnerInterface):
     ):
         BOOTSTRAP_MOUNTS = ["~/ray_bootstrap_config.yaml", "~/ray_bootstrap_key.pem"]
 
-        # TODO: Maybe add another step after Setup say Post-Setup which will 
+        # TODO: Maybe add another step after Setup say Post-Setup which will
         # help in setting up the host after the container comes up.
         if "VsphereNodeProvider" in str(type(self.ssh_command_runner.provider)):
             BOOTSTRAP_MOUNTS += ["~/ray_bootstrap_public_key.key"]
@@ -782,7 +773,6 @@ class DockerCommandRunner(CommandRunnerInterface):
                 .strip()
             )
             home_directory = "/root"
-            print("image_env: %s end"%(image_env))
             try:
                 for env_var in json.loads(image_env):
                     if env_var.startswith("HOME="):
@@ -822,7 +812,6 @@ class DockerCommandRunner(CommandRunnerInterface):
                     # NOTE(ilr) This rsync is needed because when starting from
                     #  a stopped instance,  /tmp may be deleted and `run_init`
                     # is called before the first `file_sync` happens
-                    print("run_rsync_up file mounts")
                     self.run_rsync_up(file_mounts[mount], mount)
                 self.ssh_command_runner.run(
                     "rsync -e '{cmd} exec -i' -avz {src} {container}:{dst}".format(

@@ -42,10 +42,12 @@ def _import_azure(provider_config):
 
     return AzureNodeProvider
 
+
 def _import_vsphere(provider_config):
     from ray.autoscaler._private.vsphere.node_provider import VsphereNodeProvider
 
     return VsphereNodeProvider
+
 
 def _import_local(provider_config):
     if "coordinator_address" in provider_config:
@@ -125,10 +127,12 @@ def _load_aws_defaults_config():
 
     return os.path.join(os.path.dirname(ray_aws.__file__), "defaults.yaml")
 
+
 def _load_vsphere_defaults_config():
     import ray.autoscaler.vsphere as ray_vsphere
 
     return os.path.join(os.path.dirname(ray_vsphere.__file__), "defaults.yaml")
+
 
 def _load_gcp_defaults_config():
     import ray.autoscaler.gcp as ray_gcp
@@ -180,7 +184,7 @@ _PROVIDER_PRETTY_NAMES = {
     "kuberay": "Kuberay",
     "aliyun": "Aliyun",
     "external": "External",
-    "vsphere": "vSphere"
+    "vsphere": "vSphere",
 }
 
 _DEFAULT_CONFIGS = {
@@ -191,7 +195,7 @@ _DEFAULT_CONFIGS = {
     "azure": _load_azure_defaults_config,
     "aliyun": _load_aliyun_defaults_config,
     "kubernetes": _load_kubernetes_defaults_config,
-    "vsphere": _load_vsphere_defaults_config
+    "vsphere": _load_vsphere_defaults_config,
 }
 
 

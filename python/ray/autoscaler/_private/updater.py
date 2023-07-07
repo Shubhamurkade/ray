@@ -318,7 +318,7 @@ class NodeUpdater:
                         time.sleep(READY_CHECK_INTERVAL)
 
     def do_update(self):
-        
+
         self.provider.set_node_tags(
             self.node_id, {TAG_RAY_NODE_STATUS: STATUS_WAITING_FOR_SSH}
         )
@@ -327,7 +327,7 @@ class NodeUpdater:
         cli_logger.labeled_value("New status", STATUS_WAITING_FOR_SSH)
 
         deadline = time.time() + AUTOSCALER_NODE_START_WAIT_S
-    
+
         self.wait_ready(deadline)
         global_event_system.execute_callback(CreateClusterEvent.ssh_control_acquired)
 
@@ -497,7 +497,6 @@ class NodeUpdater:
             global_event_system.execute_callback(CreateClusterEvent.start_ray_runtime)
             with LogTimer(self.log_prefix + "Ray start commands", show_status=True):
                 for cmd in self.ray_start_commands:
-                    print("Trying to run command %s"%(cmd))
                     env_vars = {}
                     if self.is_head_node:
                         if usage_lib.usage_stats_enabled():
