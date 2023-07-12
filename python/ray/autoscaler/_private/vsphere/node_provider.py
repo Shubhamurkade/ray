@@ -64,21 +64,21 @@ class VsphereNodeProvider(NodeProvider):
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
-        vsphere_credentials = provider_config.get("vsphere_config")
+        vsphere_credentials = provider_config["vsphere_config"]["credentials"]
         self.vsphere_credentials = vsphere_credentials
 
         self.vsphere_automation_sdk_client = VmwSdkClient(
             vsphere_credentials["server"],
-            vsphere_credentials["admin_user"],
-            vsphere_credentials["admin_password"],
+            vsphere_credentials["user"],
+            vsphere_credentials["password"],
             VmwSdkClient.SessionType.UNVERIFIED,
             VmwSdkClient.ClientType.AUTOMATION_SDK,
         ).get_client()
 
         self.vsphere_pyvmomi_sdk_client = VmwSdkClient(
             vsphere_credentials["server"],
-            vsphere_credentials["admin_user"],
-            vsphere_credentials["admin_password"],
+            vsphere_credentials["user"],
+            vsphere_credentials["password"],
             VmwSdkClient.SessionType.UNVERIFIED,
             VmwSdkClient.ClientType.PYVMOMI_SDK,
         ).get_client()
@@ -708,8 +708,8 @@ class VsphereNodeProvider(NodeProvider):
         # TODO: Find a better way to solve pyvmomi timeout issues
         self.vsphere_pyvmomi_sdk_client = VmwSdkClient(
             self.vsphere_credentials["server"],
-            self.vsphere_credentials["admin_user"],
-            self.vsphere_credentials["admin_password"],
+            self.vsphere_credentials["user"],
+            self.vsphere_credentials["password"],
             VmwSdkClient.SessionType.UNVERIFIED,
             VmwSdkClient.ClientType.PYVMOMI_SDK,
         ).get_client()

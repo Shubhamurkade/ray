@@ -27,6 +27,7 @@ def bootstrap_vsphere(config):
     # create a copy of the input config to modify
     config = copy.deepcopy(config)
 
+    add_credentials_into_provider_section(config)
     # Update library item configs
     update_library_item_configs(config)
 
@@ -47,6 +48,18 @@ def bootstrap_vsphere(config):
 
     return config
 
+def add_credentials_into_provider_section(config):
+    vsphere_config = config["provider"]["vsphere_config"]
+
+    if "credentials" in vsphere_config:
+        return
+    
+    env_credentials = {}
+    env_credentials["server"] = os.environ['VSPHERE_SERVER']
+    env_credentials["user"] = os.environ['VSPHERE_USER']
+    env_credentials["password"] = os.environ['VSPHERE_PASSWORD']
+
+    vsphere_config["credentials"] = env_credentials
 
 # Worker node_config:
 #   If clone:False or unspecified:

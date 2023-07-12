@@ -169,9 +169,28 @@ Deploying Ray on vSphere
 --------
 - Create an input manifest file taking the following sample file as a reference: `Sample input manifest`_. 
 - Build docker image which will be used on the Ray nodes: ``sh build-push-ray-vsphere-docker-image.sh <username>``. ``<username>`` is your VMware user-name and it is used for uniquely tagging docker images. 
-  
-  - Building an image is a fast operation. Hence, this step and the next can be started simultaneously. By the time the image starts to get pulled onto the VMs, the docker image would have been built and pushed.
 - Add ``harbor-repo.vmware.com/ray/ray-on-vsphere:<username>`` image that we built in the previous step to the ``image:`` parameter in the manifest file.
+- Ray requires credentials to the vSphere environment which can be specified in either of the following ways:
+
+  - Add a ``credentials`` section in the YAML (in ``provider`` --> ``vsphere_config``) file as follows:
+
+    .. code-block:: yaml
+       
+       provider:
+          vsphere_config:
+              credentials:
+                  server: <vsphere-ip>
+                  user: <vsphere-username>
+                  password: <vsphere-password>
+      
+  - Export the following environment variables:
+
+    .. code-block:: shell
+
+       export VSPHERE_SERVER=<vsphere-ip>
+       export VSPHERE_USER=<vsphere-user>
+       export VSPHERE_PASSWORD=<vsphere-password>
+
 - Run ``ray up <manifest-file>`` command.
   
   - The command uses cached configuration by default. In case of any failures observed, execute ``ray up <manifest-file> --no-config-cache``
