@@ -29,7 +29,7 @@ def bootstrap_vsphere(config):
 
     add_credentials_into_provider_section(config)
     # Update library item configs
-    update_library_item_configs(config)
+    update_vsphere_configs(config)
 
     # Log warnings if user included deprecated `head_node` or `worker_nodes`
     # fields. Raise error if no `available_node_types`
@@ -49,9 +49,13 @@ def bootstrap_vsphere(config):
     return config
 
 def add_credentials_into_provider_section(config):
-    vsphere_config = config["provider"]["vsphere_config"]
 
-    if "credentials" in vsphere_config:
+    provider_config = config["provider"]
+
+    # vsphere_config is an optional field as the credentials can also be specified
+    # as env variables so first check verifies if this field is present before
+    # accessing its properties
+    if "vsphere_config" in provider_config and "credentials" in provider_config["vsphere_config"]:
         return
     
     env_credentials = {}
@@ -59,7 +63,8 @@ def add_credentials_into_provider_section(config):
     env_credentials["user"] = os.environ['VSPHERE_USER']
     env_credentials["password"] = os.environ['VSPHERE_PASSWORD']
 
-    vsphere_config["credentials"] = env_credentials
+    provider_config["vsphere_config"] = {}
+    provider_config["vsphere_config"]["credentials"] = env_credentials
 
 # Worker node_config:
 #   If clone:False or unspecified:
@@ -73,7 +78,7 @@ def add_credentials_into_provider_section(config):
 #       If library_item specified:
 #           A frozen VM is created from the library item
 #           Remaining workers are created from the created frozen VM
-def update_library_item_configs(config):
+def update_vsphere_configs(config):
     available_node_types = config["available_node_types"]
 
     # Fetch worker: field from the YAML file
@@ -105,24 +110,36 @@ def update_library_item_configs(config):
     # by default create worker nodes in the head node's resource pool
     worker_resource_pool = head_node_config["resource_pool"]
 
-    worker_node_config["resource_pool"] = worker_resource_pool
     # If different resource pool is provided for worker nodes, use it
     if "resource_pool" in worker_node_config and worker_node_config["resource_pool"]:
         worker_resource_pool = worker_node_config["resource_pool"]
+    
+    worker_node_config["resource_pool"] = worker_resource_pool
 
+    worker_networks = None
+
+    if "networks" in head_node_config and head_node_config["networks"]:
+        worker_networks = head_node_config["networks"]
+
+    if "networks" in worker_node_config and worker_node_config["networks"]:
+        worker_networks = worker_node_config["networks"]
+
+    worker_node_config["networks"] = worker_networks
+    
     if "clone" in worker_node_config and worker_node_config["clone"] == True:
         if "library_item" not in worker_node_config:
             raise ValueError(
                 "library_item is mandatory if clone:True is set for worker config"
             )
 
-        freeze_vm_library_item = worker_node_config["library_item"]
+        worker_library_item = worker_node_config["library_item"]
 
-        # Create a new object with properties to be used while creating the freeze VM.
+        # Create a new object with properties to be used while creating the frozen VM.
         freeze_vm = {
-            "library_item": freeze_vm_library_item,
+            "library_item": worker_library_item,
             "resource_pool": worker_resource_pool,
             "resources": worker_node_config["resources"],
+            "networks": worker_networks,
         }
 
         # Add the newly created feeze_vm object to head_node config
