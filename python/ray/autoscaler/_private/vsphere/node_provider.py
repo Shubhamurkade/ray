@@ -181,6 +181,7 @@ class VsphereNodeProvider(NodeProvider):
             self.node_config["resources"] = freeze_vm["resources"]
             self.node_config["networks"] = freeze_vm["networks"]
             self.node_config["keep_nics_disconnected"] =  True
+            self.node_config["datastore"] = freeze_vm["datastore"]
             self.outer_obj = outer_obj
             self.target_name = target_name
             self.thread_exception = None
@@ -585,6 +586,11 @@ class VsphereNodeProvider(NodeProvider):
             "Found an OVF template: {} to deploy.".format(ovf_summary.name)
         )
 
+        datastore_id = None
+        if "datastore" in node_config and node_config["datastore"]:
+            datastore_filter_spec = Datastore.FilterSpec(names=set([node_config["datastore"]]))
+            datastore_id = self.vsphere_automation_sdk_client.vcenter.Datastore.list(datastore_filter_spec)[0].datastore
+
         # Build the deployment spec
         deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
             name=vm_name_target,
@@ -597,7 +603,7 @@ class VsphereNodeProvider(NodeProvider):
             locale=None,
             flags=None,
             additional_parameters=None,
-            default_datastore_id=None,
+            default_datastore_id=datastore_id,
         )
 
         # Deploy the ovf template

@@ -117,6 +117,7 @@ def update_vsphere_configs(config):
     worker_node_config["resource_pool"] = worker_resource_pool
 
     worker_networks = None
+    worker_datastore = None
 
     if "networks" in head_node_config and head_node_config["networks"]:
         worker_networks = head_node_config["networks"]
@@ -125,6 +126,14 @@ def update_vsphere_configs(config):
         worker_networks = worker_node_config["networks"]
 
     worker_node_config["networks"] = worker_networks
+
+    if "datastore" in head_node_config and head_node_config["datastore"]:
+        worker_datastore = head_node_config["datastore"]
+
+    if "datastore" in worker_node_config and worker_node_config["datastore"]:
+        worker_datastore = worker_node_config["datastore"]
+
+    worker_node_config["datastore"] = worker_datastore
     
     if "clone" in worker_node_config and worker_node_config["clone"] == True:
         if "library_item" not in worker_node_config:
@@ -140,6 +149,7 @@ def update_vsphere_configs(config):
             "resource_pool": worker_resource_pool,
             "resources": worker_node_config["resources"],
             "networks": worker_networks,
+            "datastore": worker_datastore,
         }
 
         # Add the newly created feeze_vm object to head_node config
