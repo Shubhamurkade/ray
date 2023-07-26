@@ -21,9 +21,9 @@ from com.vmware.vcenter.guest_client import (
     GlobalDNSSettings,
 )
 from com.vmware.vcenter.ovf_client import LibraryItem
-from com.vmware.vcenter.vm.hardware_client import Cpu, Memory, Ethernet
+from com.vmware.vcenter.vm.hardware_client import Cpu, Ethernet, Memory
 from com.vmware.vcenter.vm_client import Power as HardPower
-from com.vmware.vcenter_client import VM, ResourcePool, Network, Datastore
+from com.vmware.vcenter_client import VM, Datastore, Network, ResourcePool
 from pyVim.task import WaitForTask
 from pyVmomi import vim
 
@@ -160,9 +160,9 @@ class VsphereNodeProvider(NodeProvider):
                         vm_id = vms[0].vm
                         self.outer_obj.set_node_tags(vm_id, self.tags)
                         return
-                
+
                 raise RuntimeError("VM {} could not be found.".format(self.vm_name))
-            
+
             except Exception as e:
                 self.thread_exception = e
 
@@ -180,7 +180,7 @@ class VsphereNodeProvider(NodeProvider):
             self.node_config["resource_pool"] = freeze_vm["resource_pool"]
             self.node_config["resources"] = freeze_vm["resources"]
             self.node_config["networks"] = freeze_vm["networks"]
-            self.node_config["keep_nics_disconnected"] =  True
+            self.node_config["keep_nics_disconnected"] = True
             self.node_config["datastore"] = freeze_vm["datastore"]
             self.outer_obj = outer_obj
             self.target_name = target_name
@@ -199,8 +199,10 @@ class VsphereNodeProvider(NodeProvider):
                     cli_logger.info("Frozen VM already exists. Not creating again.")
 
                     vm_id = vms[0].vm
-                    status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
-                    
+                    status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(
+                        vm_id
+                    )
+
                     if status.state != HardPower.State.POWERED_ON:
                         cli_logger.info("Frozen VM is off. Powering it ON")
                         self.vsphere_automation_sdk_client.vcenter.vm.Power.start(vm_id)
@@ -539,18 +541,30 @@ class VsphereNodeProvider(NodeProvider):
         logger.info("Successfully added cloudinit config for vm {}".format(vm_id))
 
     def create_nic(self, network_config, vm_id, start_connected=False):
-        #Find the network
+        # Find the network
         network_filter_spec = Network.FilterSpec(names=set([network_config["name"]]))
-        network_id = self.vsphere_automation_sdk_client.vcenter.Network.list(network_filter_spec)[0].network
+        network_id = self.vsphere_automation_sdk_client.vcenter.Network.list(
+            network_filter_spec
+        )[0].network
 
-        #Create a NIC to connect to the network found above.
-        backing = Ethernet.BackingSpec(type=Ethernet.BackingType.__dict__[network_config["backing_type"]], network=network_id)
-        eth_create_spec = Ethernet.CreateSpec(type=Ethernet.EmulationType.__dict__[network_config["adapter_type"]], backing=backing, start_connected=start_connected, allow_guest_control=True)
-        
+        # Create a NIC to connect to the network found above.
+        backing = Ethernet.BackingSpec(
+            type=Ethernet.BackingType.__dict__[network_config["backing_type"]],
+            network=network_id,
+        )
+        eth_create_spec = Ethernet.CreateSpec(
+            type=Ethernet.EmulationType.__dict__[network_config["adapter_type"]],
+            backing=backing,
+            start_connected=start_connected,
+            allow_guest_control=True,
+        )
+
         cli_logger.info("Creating NIC for VM {}".format(vm_id))
 
-        self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.create(vm_id, eth_create_spec)
-        
+        self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.create(
+            vm_id, eth_create_spec
+        )
+
     def create_ovf_node(self, node_config, vm_name_target):
         # Find and use the resource pool defined in the manifest file.
         rp_filter_spec = ResourcePool.FilterSpec(
@@ -588,8 +602,12 @@ class VsphereNodeProvider(NodeProvider):
 
         datastore_id = None
         if "datastore" in node_config and node_config["datastore"]:
-            datastore_filter_spec = Datastore.FilterSpec(names=set([node_config["datastore"]]))
-            datastore_id = self.vsphere_automation_sdk_client.vcenter.Datastore.list(datastore_filter_spec)[0].datastore
+            datastore_filter_spec = Datastore.FilterSpec(
+                names=set([node_config["datastore"]])
+            )
+            datastore_id = self.vsphere_automation_sdk_client.vcenter.Datastore.list(
+                datastore_filter_spec
+            )[0].datastore
 
         # Build the deployment spec
         deployment_spec = LibraryItem.ResourcePoolDeploymentSpec(
@@ -661,7 +679,7 @@ class VsphereNodeProvider(NodeProvider):
 
         # Inject a new user with public key into the VM
         self.set_cloudinit_userdata(vm_id)
-            
+
         status = self.vsphere_automation_sdk_client.vcenter.vm.Power.get(vm_id)
         if status.state != HardPower.State.POWERED_ON:
             cli_logger.info("Powering on VM")
@@ -671,7 +689,10 @@ class VsphereNodeProvider(NodeProvider):
         if "networks" in node_config and node_config["networks"]:
             for network in node_config["networks"]:
                 # For frozen VM, keep the NICs in disconnected state on power on
-                if "keep_nics_disconnected" in node_config and node_config["keep_nics_disconnected"] == True:
+                if (
+                    "keep_nics_disconnected" in node_config
+                    and node_config["keep_nics_disconnected"] == True
+                ):
                     self.create_nic(network, vm_id, False)
                 else:
                     self.create_nic(network, vm_id, True)
@@ -767,22 +788,34 @@ class VsphereNodeProvider(NodeProvider):
         return obj
 
     def disconnect_nics(self, vm_id):
-        nics = self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.list(vm_id)
+        nics = self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.list(
+            vm_id
+        )
 
         for nic in nics:
             eth_update_spec = Ethernet.UpdateSpec(start_connected=False)
-            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.update(vm_id, nic.nic, eth_update_spec)
+            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.update(
+                vm_id, nic.nic, eth_update_spec
+            )
             cli_logger.info("Disconnecting NIC {} from VM {}".format(nic.name, vm_id))
-            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.disconnect(vm_id, nic)
+            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.disconnect(
+                vm_id, nic
+            )
 
     def connect_nics(self, vm_id):
-        nics = self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.list(vm_id)
+        nics = self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.list(
+            vm_id
+        )
 
         for nic in nics:
             eth_update_spec = Ethernet.UpdateSpec(start_connected=True)
-            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.update(vm_id, nic.nic, eth_update_spec)
+            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.update(
+                vm_id, nic.nic, eth_update_spec
+            )
             cli_logger.info("Connecting NIC {} to VM {}".format(nic, vm_id))
-            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.connect(vm_id, nic.nic)
+            self.vsphere_automation_sdk_client.vcenter.vm.hardware.Ethernet.connect(
+                vm_id, nic.nic
+            )
 
     def create_instant_clone_node(self, source_vm, vm_name_target):
         vm_relocate_spec = vim.vm.RelocateSpec()
@@ -995,9 +1028,7 @@ class VsphereNodeProvider(NodeProvider):
                 category_spec
             )
         except ErrorClients.Unauthorized as e:
-            cli_logger.abort(
-                f"Unathorised to create the category. Exception: {e}"
-            )
+            cli_logger.abort(f"Unathorised to create the category. Exception: {e}")
         except Exception as e:
             cli_logger.abort(e)
 

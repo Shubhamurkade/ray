@@ -48,6 +48,7 @@ def bootstrap_vsphere(config):
 
     return config
 
+
 def add_credentials_into_provider_section(config):
 
     provider_config = config["provider"]
@@ -55,16 +56,20 @@ def add_credentials_into_provider_section(config):
     # vsphere_config is an optional field as the credentials can also be specified
     # as env variables so first check verifies if this field is present before
     # accessing its properties
-    if "vsphere_config" in provider_config and "credentials" in provider_config["vsphere_config"]:
+    if (
+        "vsphere_config" in provider_config
+        and "credentials" in provider_config["vsphere_config"]
+    ):
         return
-    
+
     env_credentials = {}
-    env_credentials["server"] = os.environ['VSPHERE_SERVER']
-    env_credentials["user"] = os.environ['VSPHERE_USER']
-    env_credentials["password"] = os.environ['VSPHERE_PASSWORD']
+    env_credentials["server"] = os.environ["VSPHERE_SERVER"]
+    env_credentials["user"] = os.environ["VSPHERE_USER"]
+    env_credentials["password"] = os.environ["VSPHERE_PASSWORD"]
 
     provider_config["vsphere_config"] = {}
     provider_config["vsphere_config"]["credentials"] = env_credentials
+
 
 # Worker node_config:
 #   If clone:False or unspecified:
@@ -113,7 +118,7 @@ def update_vsphere_configs(config):
     # If different resource pool is provided for worker nodes, use it
     if "resource_pool" in worker_node_config and worker_node_config["resource_pool"]:
         worker_resource_pool = worker_node_config["resource_pool"]
-    
+
     worker_node_config["resource_pool"] = worker_resource_pool
 
     worker_networks = None
@@ -134,7 +139,7 @@ def update_vsphere_configs(config):
         worker_datastore = worker_node_config["datastore"]
 
     worker_node_config["datastore"] = worker_datastore
-    
+
     if "clone" in worker_node_config and worker_node_config["clone"] == True:
         if "library_item" not in worker_node_config:
             raise ValueError(
