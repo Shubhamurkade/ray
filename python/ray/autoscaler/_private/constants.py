@@ -79,7 +79,7 @@ AUTOSCALER_MAX_RESOURCE_DEMAND_VECTOR_SIZE = 1000
 AUTOSCALER_METRIC_PORT = env_integer("AUTOSCALER_METRIC_PORT", 44217)
 
 # Max number of retries to AWS (default is 5, time increases exponentially)
-VSPHERE_MAX_RETRIES = env_integer("VSPHERE_MAX_RETRIES", 12)
+BOTO_MAX_RETRIES = env_integer("BOTO_MAX_RETRIES", 12)
 # Max number of retries to create an EC2 node (retry different subnet)
 BOTO_CREATE_MAX_RETRIES = env_integer("BOTO_CREATE_MAX_RETRIES", 5)
 

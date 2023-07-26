@@ -323,22 +323,17 @@ class NodeUpdater:
                         time.sleep(READY_CHECK_INTERVAL)
 
     def do_update(self):
-
         self.provider.set_node_tags(
             self.node_id, {TAG_RAY_NODE_STATUS: STATUS_WAITING_FOR_SSH}
         )
-
-        cli_logger.print("Update call")
         cli_logger.labeled_value("New status", STATUS_WAITING_FOR_SSH)
 
         deadline = time.time() + AUTOSCALER_NODE_START_WAIT_S
-
         self.wait_ready(deadline)
         global_event_system.execute_callback(CreateClusterEvent.ssh_control_acquired)
 
-        # node_tags = self.provider.node_tags(self.node_id)
-        # logger.debug("Node tags: {}".format(str(node_tags)))
-        node_tags = {}
+        node_tags = self.provider.node_tags(self.node_id)
+        logger.debug("Node tags: {}".format(str(node_tags)))
 
         if self.provider_type == "aws" and self.provider.provider_config:
             from ray.autoscaler._private.aws.cloudwatch.cloudwatch_helper import (
@@ -502,6 +497,7 @@ class NodeUpdater:
             global_event_system.execute_callback(CreateClusterEvent.start_ray_runtime)
             with LogTimer(self.log_prefix + "Ray start commands", show_status=True):
                 for cmd in self.ray_start_commands:
+
                     env_vars = {}
                     if self.is_head_node:
                         if usage_lib.usage_stats_enabled():
@@ -524,7 +520,6 @@ class NodeUpdater:
                         old_redirected = cmd_output_util.is_output_redirected()
                         cmd_output_util.set_output_redirected(False)
                         # Runs in the container if docker is in use
-
                         self.cmd_runner.run(
                             cmd, environment_variables=env_vars, run_env="auto"
                         )

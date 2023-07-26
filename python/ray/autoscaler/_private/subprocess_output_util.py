@@ -238,6 +238,7 @@ def _run_and_process_output(
         stdin_overwrite = None
 
     # See implementation note #1
+
     if use_login_shells or process_runner != subprocess:
         return process_runner.check_call(
             cmd,
@@ -335,6 +336,7 @@ def run_cmd_redirected(
             stderr_file=process_runner.DEVNULL,
             use_login_shells=use_login_shells,
         )
+
     if not is_output_redirected():
         return _run_and_process_output(
             cmd,
