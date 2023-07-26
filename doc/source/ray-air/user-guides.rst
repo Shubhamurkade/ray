@@ -1,102 +1,10 @@
+:orphan:
+
 .. _air-guides:
 
 ===========
 User Guides
 ===========
-
-.. _air-feature-guide:
-
-AIR User Guides
----------------
-
-.. grid:: 3
-    :gutter: 2
-    :class-container: container pb-4
-
-    .. grid-item-card::
-        :img-top: /ray-air/images/preprocessors.svg
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: /ray-air/preprocessors
-            :color: primary
-            :outline:
-            :expand:
-
-            Using Preprocessors
-
-    .. grid-item-card::
-        :img-top: /ray-air/images/train-icon.svg
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: trainers
-            :color: primary
-            :outline:
-            :expand:
-
-            Using Trainers
-
-    .. grid-item-card::
-        :img-top: /ray-air/images/ingest-icon.svg
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: air-ingest
-            :color: primary
-            :outline:
-            :expand:
-
-            Configuring Training Datasets
-
-    .. grid-item-card::
-        :img-top: /ray-air/images/tuner.svg
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: /ray-air/tuner
-            :color: primary
-            :outline:
-            :expand:
-
-            Configuring Hyperparameter Tuning
-
-    .. grid-item-card::
-        :img-top:  /ray-air/images/predictors.png
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: predictors
-            :color: primary
-            :outline:
-            :expand:
-
-            Using Predictors for Inference
-
-    .. grid-item-card::
-        :img-top: /ray-air/images/serve-icon.svg
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: /ray-air/examples/serving_guide
-            :color: primary
-            :outline:
-            :expand:
-
-            Deploying Predictors with Serve
-
-    .. grid-item-card::
-        :img-top: /ray-air/images/air-deploy.svg
-        :class-img-top: pt-5 w-75 d-block mx-auto fixed-height-img
-
-        +++
-        .. button-ref:: air-deployment
-            :color: primary
-            :outline:
-            :expand:
-
-            How to Deploy AIR
-
 
 .. _air-env-vars:
 
@@ -110,6 +18,11 @@ Please also see the :ref:`Ray Tune environment variables <tune-env-vars>`.
 - **RAY_AIR_FULL_TRACEBACKS**: If set to 1, will print full tracebacks for training functions,
   including internal code paths. Otherwise, abbreviated tracebacks that only show user code
   are printed. Defaults to 0 (disabled).
+- **RAY_AIR_NEW_OUTPUT**: If set to 0, this disables
+  the `experimental new console output <https://github.com/ray-project/ray/issues/36949>`_.
+- **RAY_AIR_RICH_LAYOUT**: If set to 1, this enables
+  the `stick table layout <https://github.com/ray-project/ray/issues/36949>`_
+  (only available for Ray Tune).
 
 .. _air-multi-tenancy:
 

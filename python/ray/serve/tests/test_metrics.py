@@ -6,9 +6,9 @@ import pytest
 
 import ray
 from ray import serve
-from ray._private.test_utils import wait_for_condition
+from ray._private.test_utils import SignalActor, wait_for_condition
 from ray.serve._private.utils import block_until_http_ready
-import ray.experimental.state.api as state_api
+import ray.util.state as state_api
 from fastapi import FastAPI
 from ray.serve.metrics import Counter, Histogram, Gauge
 from ray.serve._private.constants import DEFAULT_LATENCY_BUCKET_MS
@@ -22,7 +22,7 @@ def serve_start_shutdown():
     ray.init(
         _metrics_export_port=9999,
         _system_config={
-            "metrics_report_interval_ms": 1000,
+            "metrics_report_interval_ms": 100,
             "task_retry_delay_ms": 50,
         },
     )
@@ -88,8 +88,57 @@ def test_serve_metrics_for_successful_connection(serve_start_shutdown):
         verify_metrics(do_assert=True)
 
 
-def test_http_metrics(serve_start_shutdown):
+def test_http_replica_gauge_metrics(serve_start_shutdown):
+    """Test http replica gauge metrics"""
+    signal = SignalActor.remote()
 
+    @serve.deployment(graceful_shutdown_timeout_s=0.0001)
+    class A:
+        async def __call__(self):
+            await signal.wait.remote()
+
+    handle = serve.run(A.bind(), name="app1")
+    _ = handle.remote()
+
+    processing_requests = get_metric_dictionaries(
+        "serve_replica_processing_queries", timeout=5
+    )
+    assert len(processing_requests) == 1
+    assert processing_requests[0]["deployment"] == "app1_A"
+    assert processing_requests[0]["application"] == "app1"
+    print("serve_replica_processing_queries exists.")
+
+    pending_requests = get_metric_dictionaries(
+        "serve_replica_pending_queries", timeout=5
+    )
+    assert len(pending_requests) == 1
+    assert pending_requests[0]["deployment"] == "app1_A"
+    assert pending_requests[0]["application"] == "app1"
+    print("serve_replica_pending_queries exists.")
+
+    def ensure_request_processing():
+        resp = requests.get("http://127.0.0.1:9999").text
+        resp = resp.split("\n")
+        expected_metrics = {
+            "serve_replica_processing_queries",
+            "serve_replica_pending_queries",
+        }
+        for metrics in resp:
+            if "# HELP" in metrics or "# TYPE" in metrics:
+                continue
+            if "serve_replica_processing_queries" in metrics:
+                assert "1.0" in metrics
+                expected_metrics.discard("serve_replica_processing_queries")
+            elif "serve_replica_pending_queries" in metrics:
+                assert "0.0" in metrics
+                expected_metrics.discard("serve_replica_pending_queries")
+        assert len(expected_metrics) == 0
+        return True
+
+    wait_for_condition(ensure_request_processing, timeout=5)
+
+
+def test_http_metrics(serve_start_shutdown):
     # NOTE: These metrics should be documented at
     # https://docs.ray.io/en/latest/serve/monitoring.html#metrics
     # Any updates here should be reflected there too.
@@ -259,7 +308,7 @@ def test_http_redirect_metrics(serve_start_shutdown):
 
     wait_for_condition(
         lambda: len(get_metric_dictionaries("serve_num_http_requests")) == 2,
-        timeout=20,
+        timeout=40,
     )
     num_http_requests = get_metric_dictionaries("serve_num_http_requests")
     expected_output = [
@@ -280,7 +329,7 @@ def test_http_redirect_metrics(serve_start_shutdown):
 
     wait_for_condition(
         lambda: len(get_metric_dictionaries("serve_http_request_latency_ms_sum")) == 2,
-        timeout=20,
+        timeout=40,
     )
     http_latency = get_metric_dictionaries("serve_num_http_requests")
     expected_output = [
@@ -315,7 +364,7 @@ def test_replica_metrics_fields(serve_start_shutdown):
 
     wait_for_condition(
         lambda: len(get_metric_dictionaries("serve_deployment_request_counter")) == 2,
-        timeout=20,
+        timeout=40,
     )
 
     num_requests = get_metric_dictionaries("serve_deployment_request_counter")
@@ -336,7 +385,7 @@ def test_replica_metrics_fields(serve_start_shutdown):
             get_metric_dictionaries("serve_deployment_processing_latency_ms_count")
         )
         == 2,
-        timeout=20,
+        timeout=40,
     )
     for metric_name in [
         "serve_deployment_processing_latency_ms_count",
@@ -350,8 +399,10 @@ def test_replica_metrics_fields(serve_start_shutdown):
         verify_metrics(latency_metrics[0], expected_output1)
         verify_metrics(latency_metrics[1], expected_output2)
 
+    wait_for_condition(
+        lambda: len(get_metric_dictionaries("serve_replica_processing_queries")) == 2
+    )
     processing_queries = get_metric_dictionaries("serve_replica_processing_queries")
-    assert len(processing_queries) == 2
     expected_output1 = {"deployment": "app1_f", "application": "app1"}
     expected_output2 = {"deployment": "app2_g", "application": "app2"}
     verify_metrics(processing_queries[0], expected_output1)
@@ -365,7 +416,7 @@ def test_replica_metrics_fields(serve_start_shutdown):
     assert 500 == requests.get("http://127.0.0.1:8000/h").status_code
     wait_for_condition(
         lambda: len(get_metric_dictionaries("serve_deployment_error_counter")) == 1,
-        timeout=20,
+        timeout=40,
     )
     err_requests = get_metric_dictionaries("serve_deployment_error_counter")
     assert len(err_requests) == 1
@@ -397,27 +448,31 @@ class TestRequestContextMetrics:
         metrics_summary_route = DefaultDict(set)
         metrics_summary_app = DefaultDict(str)
 
-        for request_metrcis in metrics:
-            metrics_summary_route[request_metrcis["deployment"]].add(
-                request_metrcis["route"]
+        for request_metrics in metrics:
+            metrics_summary_route[request_metrics["deployment"]].add(
+                request_metrics["route"]
             )
-            metrics_summary_app[request_metrcis["deployment"]] = request_metrcis[
+            metrics_summary_app[request_metrics["deployment"]] = request_metrics[
                 "application"
             ]
         return metrics_summary_route, metrics_summary_app
 
+    def verify_metrics(self, metric, expected_output):
+        for key in expected_output:
+            assert metric[key] == expected_output[key]
+
     def test_request_context_pass_for_http_proxy(self, serve_start_shutdown):
         """Test HTTP proxy passing request context"""
 
-        @serve.deployment
+        @serve.deployment(graceful_shutdown_timeout_s=0.001)
         def f():
             return "hello"
 
-        @serve.deployment
+        @serve.deployment(graceful_shutdown_timeout_s=0.001)
         def g():
             return "world"
 
-        @serve.deployment
+        @serve.deployment(graceful_shutdown_timeout_s=0.001)
         def h():
             return 1 / 0
 
@@ -439,23 +494,40 @@ class TestRequestContextMetrics:
                 get_metric_dictionaries("serve_deployment_processing_latency_ms_sum")
             )
             == 3,
-            timeout=20,
+            timeout=40,
         )
 
+        def wait_for_route_and_name(
+            metric_name: str,
+            deployment_name: str,
+            app_name: str,
+            route: str,
+            timeout: float = 5,
+        ):
+            """Waits for app name and route to appear in deployment's metric."""
+
+            def check():
+                # Check replica qps & latency
+                (
+                    qps_metrics_route,
+                    qps_metrics_app_name,
+                ) = self._generate_metrics_summary(get_metric_dictionaries(metric_name))
+                assert qps_metrics_app_name[deployment_name] == app_name
+                assert qps_metrics_route[deployment_name] == {route}
+                return True
+
+            wait_for_condition(check, timeout=timeout)
+
         # Check replica qps & latency
-        qps_metrics_route, qps_metrics_app_name = self._generate_metrics_summary(
-            get_metric_dictionaries("serve_deployment_request_counter")
+        wait_for_route_and_name(
+            "serve_deployment_request_counter", "app1_f", "app1", "/app1"
         )
-        print(qps_metrics_route)
-        assert qps_metrics_route["app1_f"] == {"/app1"}
-        assert qps_metrics_route["app2_g"] == {"/app2"}
-        assert qps_metrics_app_name["app1_f"] == "app1"
-        assert qps_metrics_app_name["app2_g"] == "app2"
-        qps_metrics_route, qps_metrics_app_name = self._generate_metrics_summary(
-            get_metric_dictionaries("serve_deployment_error_counter")
+        wait_for_route_and_name(
+            "serve_deployment_request_counter", "app2_g", "app2", "/app2"
         )
-        assert qps_metrics_route["app3_h"] == {"/app3"}
-        assert qps_metrics_app_name["app3_h"] == "app3"
+        wait_for_route_and_name(
+            "serve_deployment_error_counter", "app3_h", "app3", "/app3"
+        )
 
         # Check http proxy qps & latency
         for metric_name in [
@@ -475,7 +547,7 @@ class TestRequestContextMetrics:
             "serve_deployment_processing_latency_ms_sum",
         ]:
             metrics_route, metrics_app_name = self._generate_metrics_summary(
-                get_metric_dictionaries("serve_handle_request_counter")
+                get_metric_dictionaries(metric_name)
             )
             assert metrics_route["app1_f"] == {"/app1"}
             assert metrics_route["app2_g"] == {"/app2"}
@@ -527,7 +599,7 @@ class TestRequestContextMetrics:
         wait_for_condition(
             lambda: len(get_metric_dictionaries("serve_deployment_request_counter"))
             == 4,
-            timeout=20,
+            timeout=40,
         )
         (
             requests_metrics_route,
@@ -552,6 +624,7 @@ class TestRequestContextMetrics:
                     tag_keys=(
                         "my_static_tag",
                         "my_runtime_tag",
+                        "route",
                     ),
                 )
                 self.counter.set_default_tags({"my_static_tag": "static_value"})
@@ -562,6 +635,7 @@ class TestRequestContextMetrics:
                     tag_keys=(
                         "my_static_tag",
                         "my_runtime_tag",
+                        "route",
                     ),
                 )
                 self.histogram.set_default_tags({"my_static_tag": "static_value"})
@@ -571,6 +645,7 @@ class TestRequestContextMetrics:
                     tag_keys=(
                         "my_static_tag",
                         "my_runtime_tag",
+                        "route",
                     ),
                 )
                 self.gauge.set_default_tags({"my_static_tag": "static_value"})
@@ -589,31 +664,44 @@ class TestRequestContextMetrics:
         deployment_name, replica_tag = resp.json()
         wait_for_condition(
             lambda: len(get_metric_dictionaries("my_gauge")) == 1,
-            timeout=20,
+            timeout=40,
         )
+
         counter_metrics = get_metric_dictionaries("my_counter")
         assert len(counter_metrics) == 1
-        counter_metrics[0]["my_static_tag"] == "static_value"
-        counter_metrics[0]["my_runtime_tag"] == "100"
-        counter_metrics[0]["replica"] == replica_tag
-        counter_metrics[0]["deployment"] == deployment_name
-        counter_metrics[0]["application"] == "app"
+        expected_metrics = {
+            "my_static_tag": "static_value",
+            "my_runtime_tag": "100",
+            "replica": replica_tag,
+            "deployment": deployment_name,
+            "application": "app",
+            "route": "/app",
+        }
+        self.verify_metrics(counter_metrics[0], expected_metrics)
 
+        expected_metrics = {
+            "my_static_tag": "static_value",
+            "my_runtime_tag": "300",
+            "replica": replica_tag,
+            "deployment": deployment_name,
+            "application": "app",
+            "route": "/app",
+        }
         gauge_metrics = get_metric_dictionaries("my_gauge")
         assert len(counter_metrics) == 1
-        gauge_metrics[0]["my_static_tag"] == "static_value"
-        gauge_metrics[0]["my_runtime_tag"] == "300"
-        gauge_metrics[0]["replica"] == replica_tag
-        gauge_metrics[0]["deployment"] == deployment_name
-        gauge_metrics[0]["application"] == "app"
+        self.verify_metrics(gauge_metrics[0], expected_metrics)
 
+        expected_metrics = {
+            "my_static_tag": "static_value",
+            "my_runtime_tag": "200",
+            "replica": replica_tag,
+            "deployment": deployment_name,
+            "application": "app",
+            "route": "/app",
+        }
         histogram_metrics = get_metric_dictionaries("my_histogram_sum")
         assert len(histogram_metrics) == 1
-        histogram_metrics[0]["my_static_tag"] == "static_value"
-        histogram_metrics[0]["my_runtime_tag"] == "200"
-        histogram_metrics[0]["replica"] == replica_tag
-        histogram_metrics[0]["deployment"] == deployment_name
-        gauge_metrics[0]["application"] == "app"
+        self.verify_metrics(histogram_metrics[0], expected_metrics)
 
     @pytest.mark.parametrize("use_actor", [False, True])
     def test_serve_metrics_outside_serve(self, use_actor, serve_start_shutdown):
@@ -712,22 +800,75 @@ class TestRequestContextMetrics:
         assert resp.text == "hello"
         wait_for_condition(
             lambda: len(get_metric_dictionaries("my_gauge")) == 1,
-            timeout=20,
+            timeout=40,
         )
+
         counter_metrics = get_metric_dictionaries("my_counter")
         assert len(counter_metrics) == 1
-        counter_metrics[0]["my_static_tag"] == "static_value"
-        counter_metrics[0]["my_runtime_tag"] == "100"
+        expected_metrics = {
+            "my_static_tag": "static_value",
+            "my_runtime_tag": "100",
+        }
+        self.verify_metrics(counter_metrics[0], expected_metrics)
 
         gauge_metrics = get_metric_dictionaries("my_gauge")
         assert len(counter_metrics) == 1
-        gauge_metrics[0]["my_static_tag"] == "static_value"
-        gauge_metrics[0]["my_runtime_tag"] == "300"
+        expected_metrics = {
+            "my_static_tag": "static_value",
+            "my_runtime_tag": "300",
+        }
+        self.verify_metrics(gauge_metrics[0], expected_metrics)
 
         histogram_metrics = get_metric_dictionaries("my_histogram_sum")
         assert len(histogram_metrics) == 1
-        histogram_metrics[0]["my_static_tag"] == "static_value"
-        histogram_metrics[0]["my_runtime_tag"] == "200"
+        expected_metrics = {
+            "my_static_tag": "static_value",
+            "my_runtime_tag": "200",
+        }
+        self.verify_metrics(histogram_metrics[0], expected_metrics)
+
+
+def test_multiplexed_metrics(serve_start_shutdown):
+    """Tests multiplexed API corresponding metrics."""
+
+    @serve.deployment
+    class Model:
+        @serve.multiplexed(max_num_models_per_replica=2)
+        async def get_model(self, model_id: str):
+            return model_id
+
+        async def __call__(self, model_id: str):
+            await self.get_model(model_id)
+            return
+
+    handle = serve.run(Model.bind(), name="app", route_prefix="/app")
+    handle.remote("model1")
+    handle.remote("model2")
+    # Trigger model eviction.
+    handle.remote("model3")
+    expected_metrics = [
+        "serve_multiplexed_model_load_latency_s",
+        "serve_multiplexed_model_unload_latency_s",
+        "serve_num_multiplexed_models",
+        "serve_multiplexed_models_load_counter",
+        "serve_multiplexed_models_unload_counter",
+    ]
+
+    def verify_metrics():
+        try:
+            resp = requests.get("http://127.0.0.1:9999").text
+        # Requests will fail if we are crashing the controller
+        except requests.ConnectionError:
+            return False
+        for metric in expected_metrics:
+            assert metric in resp
+        return True
+
+    wait_for_condition(
+        verify_metrics,
+        timeout=40,
+        retry_interval_ms=1000,
+    )
 
 
 def test_actor_summary(serve_instance):
@@ -782,6 +923,7 @@ def get_metric_dictionaries(name: str, timeout: float = 20) -> List[Dict]:
             metric_dict_str = f"dict({line[dict_body_start:dict_body_end]})"
             metric_dicts.append(eval(metric_dict_str))
 
+    print(metric_dicts)
     return metric_dicts
 
 

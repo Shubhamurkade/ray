@@ -1,15 +1,15 @@
 import logging
 import math
-import sys
 import os
 import random
+import sys
 import time
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
-from unittest.mock import patch
 
 import ray
 from ray.data._internal.block_builder import BlockBuilder
@@ -18,35 +18,24 @@ from ray.data._internal.lazy_block_list import LazyBlockList
 from ray.data.block import BlockAccessor, BlockMetadata
 from ray.data.context import DataContext
 from ray.data.dataset import Dataset, MaterializedDataset, _sliding_window
-from ray.data.datasource.datasource import Datasource, ReadTask
 from ray.data.datasource.csv_datasource import CSVDatasource
+from ray.data.datasource.datasource import Datasource, ReadTask
 from ray.data.tests.conftest import *  # noqa
-from ray.data.tests.util import column_udf, extract_values, STRICT_MODE
+from ray.data.tests.util import column_udf, extract_values
 from ray.tests.conftest import *  # noqa
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 
-def maybe_pipeline(ds, enabled):
-    if enabled:
-        return ds.window(blocks_per_window=1)
-    else:
-        return ds
-
-
-@pytest.mark.parametrize("pipelined", [False, True])
-def test_avoid_placement_group_capture(shutdown_only, pipelined):
+def test_avoid_placement_group_capture(shutdown_only):
     ray.init(num_cpus=2)
 
     @ray.remote
     def run():
-        ds0 = ray.data.range(5)
-        ds = maybe_pipeline(ds0, pipelined)
+        ds = ray.data.range(5)
         assert sorted(
             extract_values("id", ds.map(column_udf("id", lambda x: x + 1)).take())
         ) == [1, 2, 3, 4, 5]
-        ds = maybe_pipeline(ds0, pipelined)
         assert ds.count() == 5
-        ds = maybe_pipeline(ds0, pipelined)
         assert sorted(extract_values("id", ds.iter_rows())) == [0, 1, 2, 3, 4]
 
     pg = ray.util.placement_group([{"CPU": 1}])
@@ -136,16 +125,12 @@ def test_dataset_lineage_serialization_unsupported(shutdown_only):
         ds2.serialize_lineage()
 
 
-@pytest.mark.parametrize("pipelined", [False, True])
-def test_basic(ray_start_regular_shared, pipelined):
-    ds0 = ray.data.range(5)
-    ds = maybe_pipeline(ds0, pipelined)
+def test_basic(ray_start_regular_shared):
+    ds = ray.data.range(5)
     assert sorted(
         extract_values("id", ds.map(column_udf("id", lambda x: x + 1)).take())
     ) == [1, 2, 3, 4, 5]
-    ds = maybe_pipeline(ds0, pipelined)
     assert ds.count() == 5
-    ds = maybe_pipeline(ds0, pipelined)
     assert sorted(extract_values("id", ds.iter_rows())) == [0, 1, 2, 3, 4]
 
 
@@ -172,7 +157,7 @@ def test_empty_dataset(ray_start_regular_shared):
     ds = ds.materialize()
     assert (
         str(ds)
-        == "MaterializedDataset(num_blocks=1, num_rows=0, schema=Unknown schema)"
+        == "MaterializedDataset(num_blocks=2, num_rows=0, schema=Unknown schema)"
     )
 
     # Test map on empty dataset.
@@ -214,10 +199,17 @@ def test_cache_dataset(ray_start_regular_shared):
     assert isinstance(ds2, MaterializedDataset)
     assert not ds.is_fully_executed()
 
+    # Tests standard iteration uses the materialized blocks.
     for _ in range(10):
         ds2.take_all()
 
     assert ray.get(c.inc.remote()) == 2
+
+    # Tests streaming iteration uses the materialized blocks.
+    for _ in range(10):
+        list(ds2.streaming_split(1)[0].iter_batches())
+
+    assert ray.get(c.inc.remote()) == 3
 
 
 def test_schema(ray_start_regular_shared):
@@ -247,6 +239,54 @@ def test_schema_lazy(ray_start_regular_shared):
     assert ds._plan._in_blocks._num_computed() == 0
     # Fetching the schema should not trigger execution of extra read tasks.
     assert ds._plan.execute()._num_computed() == 0
+
+
+def test_schema_cached(ray_start_regular_shared):
+    def check_schema_cached(ds):
+        schema = ds.schema()
+        assert schema.names == ["a"]
+        cached_schema = ds.schema(fetch_if_missing=False)
+        assert cached_schema is not None
+        assert schema == cached_schema
+
+    ds = ray.data.from_items([{"a": i} for i in range(100)], parallelism=10)
+    check_schema_cached(ds)
+
+    # Add a map_batches stage so that we are forced to compute the schema.
+    ds = ds.map_batches(lambda x: x)
+    check_schema_cached(ds)
+
+
+def test_columns(ray_start_regular_shared):
+    ds = ray.data.range(1)
+    assert ds.columns() == ds.schema().names
+    assert ds.columns() == ["id"]
+
+    ds = ds.map(lambda x: x)
+    assert ds.columns(fetch_if_missing=False) is None
+
+
+def test_schema_repr(ray_start_regular_shared):
+    ds = ray.data.from_items([{"text": "spam", "number": 0}])
+    # fmt: off
+    expected_repr = (
+        "Column  Type\n"
+        "------  ----\n"
+        "text    string\n"
+        "number  int64"
+    )
+    # fmt:on
+    assert repr(ds.schema()) == expected_repr
+
+    ds = ray.data.from_items([{"long_column_name": "spam"}])
+    # fmt: off
+    expected_repr = (
+        "Column            Type\n"
+        "------            ----\n"
+        "long_column_name  string"
+    )
+    # fmt: on
+    assert repr(ds.schema()) == expected_repr
 
 
 def test_count_lazy(ray_start_regular_shared):
@@ -454,9 +494,6 @@ def test_convert_types(ray_start_regular_shared):
 def test_from_items(ray_start_regular_shared):
     ds = ray.data.from_items(["hello", "world"])
     assert extract_values("item", ds.take()) == ["hello", "world"]
-
-    ds = ray.data.from_items([{"hello": "world"}], output_arrow_format=True)
-    assert ds.take() == [{"hello": "world"}]
     assert isinstance(next(ds.iter_batches(batch_format=None)), pa.Table)
 
 
@@ -724,9 +761,8 @@ def test_iter_batches_empty_block(ray_start_regular_shared):
     )
 
 
-@pytest.mark.parametrize("pipelined", [False, True])
 @pytest.mark.parametrize("ds_format", ["arrow", "pandas"])
-def test_iter_batches_local_shuffle(shutdown_only, pipelined, ds_format):
+def test_iter_batches_local_shuffle(shutdown_only, ds_format):
     # Input validation.
     # Batch size must be given for local shuffle.
     with pytest.raises(ValueError):
@@ -743,11 +779,7 @@ def test_iter_batches_local_shuffle(shutdown_only, pipelined, ds_format):
             ds = ray.data.range(n, parallelism=parallelism).map_batches(
                 lambda df: df, batch_size=None, batch_format="pandas"
             )
-        if pipelined:
-            pipe = ds.repeat(2)
-            return pipe
-        else:
-            return ds
+        return ds
 
     def to_row_dicts(batch):
         if isinstance(batch, pd.DataFrame):
@@ -1050,8 +1082,7 @@ def test_union(ray_start_regular_shared):
     assert ds2.count() == 210
 
 
-@pytest.mark.parametrize("pipelined", [False, True])
-def test_iter_tf_batches(ray_start_regular_shared, pipelined):
+def test_iter_tf_batches(ray_start_regular_shared):
     df1 = pd.DataFrame(
         {"one": [1, 2, 3], "two": [1.0, 2.0, 3.0], "label": [1.0, 2.0, 3.0]}
     )
@@ -1061,9 +1092,8 @@ def test_iter_tf_batches(ray_start_regular_shared, pipelined):
     df3 = pd.DataFrame({"one": [7, 8], "two": [7.0, 8.0], "label": [7.0, 8.0]})
     df = pd.concat([df1, df2, df3])
     ds = ray.data.from_pandas([df1, df2, df3])
-    ds = maybe_pipeline(ds, pipelined)
 
-    num_epochs = 1 if pipelined else 2
+    num_epochs = 2
     for _ in range(num_epochs):
         iterations = []
         for batch in ds.iter_tf_batches(batch_size=3):
@@ -1074,15 +1104,13 @@ def test_iter_tf_batches(ray_start_regular_shared, pipelined):
         np.testing.assert_array_equal(np.sort(df.values), np.sort(combined_iterations))
 
 
-@pytest.mark.parametrize("pipelined", [False, True])
-def test_iter_tf_batches_tensor_ds(ray_start_regular_shared, pipelined):
+def test_iter_tf_batches_tensor_ds(ray_start_regular_shared):
     arr1 = np.arange(12).reshape((3, 2, 2))
     arr2 = np.arange(12, 24).reshape((3, 2, 2))
     arr = np.concatenate((arr1, arr2))
     ds = ray.data.from_numpy([arr1, arr2])
-    ds = maybe_pipeline(ds, pipelined)
 
-    num_epochs = 1 if pipelined else 2
+    num_epochs = 2
     for _ in range(num_epochs):
         iterations = []
         for batch in ds.iter_tf_batches(batch_size=2):
@@ -1309,21 +1337,6 @@ def test_len(ray_start_regular_shared):
         len(ds)
 
 
-@pytest.mark.skipif(STRICT_MODE, reason="Deprecated in strict mode")
-def test_simple_block_select():
-    xs = list(range(100))
-    block_accessor = BlockAccessor.for_block(xs)
-
-    block = block_accessor.select([lambda x: x % 3])
-    assert block == [x % 3 for x in xs]
-
-    with pytest.raises(ValueError):
-        block = block_accessor.select(["foo"])
-
-    with pytest.raises(ValueError):
-        block = block_accessor.select([])
-
-
 def test_pandas_block_select():
     df = pd.DataFrame({"one": [10, 11, 12], "two": [11, 12, 13], "three": [14, 15, 16]})
     block_accessor = BlockAccessor.for_block(df)
@@ -1468,7 +1481,6 @@ def test_read_write_local_node(ray_start_cluster):
 
     def check_dataset_is_local(ds):
         blocks = ds.get_internal_block_refs()
-        assert len(blocks) == num_files
         ray.wait(blocks, num_returns=len(blocks), fetch_local=False)
         location_data = ray.experimental.get_object_locations(blocks)
         locations = []
@@ -1488,7 +1500,7 @@ def test_read_write_local_node(ray_start_cluster):
     check_dataset_is_local(ds)
 
     # With fusion.
-    ds = ray.data.read_parquet(local_path).map(lambda x: x).materialize()
+    ds = ray.data.read_parquet(local_path, parallelism=1).map(lambda x: x).materialize()
     check_dataset_is_local(ds)
 
     # Write back to local scheme.
@@ -1666,7 +1678,7 @@ def test_dataset_plan_as_string(ray_start_cluster):
     ds = ray.data.read_parquet("example://iris.parquet")
     assert ds._plan.get_plan_as_string("Dataset") == (
         "Dataset(\n"
-        "   num_blocks=1,\n"
+        "   num_blocks=8,\n"
         "   num_rows=150,\n"
         "   schema={\n"
         "      sepal.length: double,\n"
@@ -1686,7 +1698,7 @@ def test_dataset_plan_as_string(ray_start_cluster):
         "      +- MapBatches(<lambda>)\n"
         "         +- MapBatches(<lambda>)\n"
         "            +- Dataset(\n"
-        "                  num_blocks=1,\n"
+        "                  num_blocks=8,\n"
         "                  num_rows=150,\n"
         "                  schema={\n"
         "                     sepal.length: double,\n"

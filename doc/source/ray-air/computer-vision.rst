@@ -1,3 +1,5 @@
+:orphan:
+
 .. _computer-vision:
 
 Computer Vision
@@ -38,7 +40,7 @@ Reading image data
             :end-before: __read_images1_stop__
             :dedent:
 
-        Then, apply a :ref:`user-defined function <transform_datasets_writing_udfs>` to
+        Then, apply a :ref:`user-defined function <transforming_data>` to
         encode the class names as integer targets.
 
         .. literalinclude:: ./doc_code/computer_vision.py
@@ -98,7 +100,7 @@ Reading image data
             :end-before: __read_tfrecords1_stop__
             :dedent:
 
-        Then, apply a :ref:`user-defined function <transform_datasets_writing_udfs>` to
+        Then, apply a :ref:`user-defined function <transforming_data>` to
         decode the raw image bytes.
 
         .. literalinclude:: ./doc_code/computer_vision.py
@@ -183,8 +185,7 @@ Training vision models
             :end-before: __torch_trainer_stop__
             :dedent:
 
-        For more in-depth examples, read :doc:`/ray-air/examples/torch_image_example` and
-        :ref:`Using Trainers <air-trainers>`.
+        For more in-depth examples, see :ref:`Using Trainers <train-getting-started>`.
 
     .. tab-item:: TensorFlow
 
@@ -203,7 +204,7 @@ Training vision models
             :end-before: __tensorflow_trainer_stop__
             :dedent:
 
-        For more information, read :ref:`Using Trainers <air-trainers>`.
+        For more information, read :ref:`Using Trainers <train-getting-started>`.
 
 Creating checkpoints
 --------------------
@@ -260,8 +261,7 @@ image datasets.
             :end-before: __torch_batch_predictor_stop__
             :dedent:
 
-        For more in-depth examples, read :doc:`/ray-air/examples/pytorch_resnet_batch_prediction`
-        and :ref:`Using Predictors for Inference <air-predictors>`.
+        For more in-depth examples, read :ref:`Using Predictors for Inference <air-predictors>`.
 
     .. tab-item:: TensorFlow
 
@@ -316,9 +316,6 @@ To NumPy ndarrays like this:
             :end-before: __torch_online_predict_stop__
             :dedent:
 
-        For more in-depth examples, read :doc:`/ray-air/examples/torch_image_example`
-        and :doc:`/ray-air/examples/serving_guide`.
-
     .. tab-item:: TensorFlow
 
         To deploy a TensorFlow model to an endpoint, pass the checkpoint you created in `Creating checkpoints`_
@@ -336,5 +333,3 @@ To NumPy ndarrays like this:
             :start-after: __tensorflow_online_predict_start__
             :end-before: __tensorflow_online_predict_stop__
             :dedent:
-
-        For more information, read :doc:`/ray-air/examples/serving_guide`.

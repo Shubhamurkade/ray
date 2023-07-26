@@ -12,7 +12,7 @@ Scaling Configurations in Train (``ScalingConfig``)
 The scaling configuration specifies distributed training properties like the number of workers or the
 resources per worker.
 
-The properties of the scaling configuration are :ref:`tunable <air-tuner-search-space>`.
+The properties of the scaling configuration are :ref:`tunable <tune-search-space-tutorial>`.
 
 .. literalinclude:: doc_code/key_concepts.py
     :language: python
@@ -38,7 +38,7 @@ and logging options.
 Many of these settings are configured through other config objects and passed through
 the ``RunConfig``. The following sub-sections contain descriptions of these configs.
 
-The properties of the run configuration are :ref:`not tunable <air-tuner-search-space>`.
+The properties of the run configuration are :ref:`not tunable <tune-search-space-tutorial>`.
 
 .. literalinclude:: doc_code/key_concepts.py
     :language: python
@@ -58,7 +58,7 @@ Failure configurations in Train (``FailureConfig``)
 The failure configuration specifies how training failures should be dealt with.
 
 As part of the RunConfig, the properties of the failure configuration
-are :ref:`not tunable <air-tuner-search-space>`.
+are :ref:`not tunable <tune-search-space-tutorial>`.
 
 
 .. literalinclude:: doc_code/key_concepts.py
@@ -78,7 +78,7 @@ The checkpoint configuration specifies how often to checkpoint training state
 and how many checkpoints to keep.
 
 As part of the RunConfig, the properties of the checkpoint configuration
-are :ref:`not tunable <air-tuner-search-space>`.
+are :ref:`not tunable <tune-search-space-tutorial>`.
 
 .. literalinclude:: doc_code/key_concepts.py
     :language: python
@@ -86,7 +86,7 @@ are :ref:`not tunable <air-tuner-search-space>`.
     :end-before: __checkpoint_config_end__
 
 Trainers of certain frameworks including :class:`~ray.train.xgboost.XGBoostTrainer`,
-:class:`~ray.train.lightgbm.LightGBMTrainer`, and :class:`~ray.train.hf_transformers.TransformersTrainer`
+:class:`~ray.train.lightgbm.LightGBMTrainer`, and :class:`~ray.train.huggingface.TransformersTrainer`
 implement checkpointing out of the box. For these trainers, checkpointing can be
 enabled by setting the checkpoint frequency within the :class:`~ray.air.CheckpointConfig`.
 
@@ -104,6 +104,11 @@ enabled by setting the checkpoint frequency within the :class:`~ray.air.Checkpoi
 .. seealso::
 
     See the :class:`~ray.air.CheckpointConfig` API reference.
+    
+**[Experimental] Distributed Checkpoints**: For model parallel workloads where the models do not fit in a single GPU worker, 
+it will be important to save and upload the model that is partitioned across different workers. You 
+can enable this by setting `_checkpoint_keep_all_ranks=True` to retain the model checkpoints across workers,
+and `_checkpoint_upload_from_workers=True` to upload their checkpoints to cloud directly in :class:`~ray.air.CheckpointConfig`. This functionality works for any trainer that inherits from :class:`~ray.train.data_parallel_trainer.DataParallelTrainer`.
 
 
 Synchronization configurations in Train (``tune.SyncConfig``)
@@ -113,7 +118,7 @@ The ``tune.SyncConfig`` specifies how synchronization of results
 and checkpoints should happen in a distributed Ray cluster.
 
 As part of the RunConfig, the properties of the failure configuration
-are :ref:`not tunable <air-tuner-search-space>`.
+are :ref:`not tunable <tune-search-space-tutorial>`.
 
 .. note::
 

@@ -19,7 +19,7 @@ from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
 from ray.rllib.utils import FilterManager
 from ray.rllib.utils.actor_manager import FaultAwareApply
 from ray.rllib.utils.annotations import override
-from ray.rllib.utils.deprecation import Deprecated
+from ray.rllib.utils.deprecation import Deprecated, ALGO_DEPRECATION_WARNING
 from ray.rllib.utils.metrics import (
     NUM_AGENT_STEPS_SAMPLED,
     NUM_AGENT_STEPS_TRAINED,
@@ -372,6 +372,12 @@ def get_policy_class(config: AlgorithmConfig):
     return policy_cls
 
 
+@Deprecated(
+    old="rllib/algorithms/es/",
+    new="rllib_contrib/es/",
+    help=ALGO_DEPRECATION_WARNING,
+    error=False,
+)
 class ES(Algorithm):
     """Large-scale implementation of Evolution Strategies in Ray."""
 
@@ -530,12 +536,14 @@ class ES(Algorithm):
         }
 
         reward_mean = np.mean(self.reward_list[-self.report_length :])
-        result = dict(
-            episode_reward_mean=reward_mean,
-            episode_len_mean=eval_lengths.mean(),
-            timesteps_this_iter=noisy_lengths.sum(),
-            info=info,
-        )
+        result = {
+            "sampler_results": {
+                "episode_reward_mean": reward_mean,
+                "episode_len_mean": eval_lengths.mean(),
+            },
+            "timesteps_this_iter": noisy_lengths.sum(),
+            "info": info,
+        }
 
         return result
 

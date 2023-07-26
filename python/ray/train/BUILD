@@ -1,3 +1,34 @@
+load("//bazel:python.bzl", "doctest")
+
+doctest(
+    files = glob(
+        ["**/*.py"],
+        exclude=[
+            "examples/**",
+            "tests/**",
+            # GPU tests
+            "tensorflow/tensorflow_trainer.py",
+            "huggingface/transformers/transformers_trainer.py",
+            "_internal/session.py",
+            "context.py"
+        ]
+    ),
+    size = "large",
+    tags = ["team:ml"],
+)
+
+doctest(
+    files = [
+        "tensorflow/tensorflow_trainer.py",
+        "huggingface/transformers/transformers_trainer.py",
+        "_internal/session.py",
+        "context.py"
+    ],
+    size = "large",
+    tags = ["team:ml"],
+    gpu = True
+)
+
 # --------------------------------------------------------------------
 # Tests from the python/ray/train/examples directory.
 # Please keep these sorted alphabetically.
@@ -216,15 +247,6 @@ py_test(
 # --------------------------------------------------------------------
 
 py_test(
-    name = "pytorch_pbt_failure",
-    size = "small",
-    srcs = ["tests/pytorch_pbt_failure.py"],
-    tags = ["team:ml", "exlusive", "no_main"],
-    deps = [":train_lib"],
-    args = ["--smoke-test"]
-)
-
-py_test(
     name = "test_accelerate_trainer_gpu",
     size = "large",
     srcs = ["tests/test_accelerate_trainer_gpu.py"],
@@ -329,6 +351,14 @@ py_test(
 )
 
 py_test(
+    name = "test_huggingface",
+    size = "small",
+    srcs = ["tests/test_huggingface.py"],
+    tags = ["team:ml", "exclusive"],
+    deps = [":train_lib"]
+)
+
+py_test(
     name = "test_torch_fsdp",
     size = "small",
     srcs = ["tests/test_torch_fsdp.py"],
@@ -396,6 +426,14 @@ py_test(
     name = "test_lightning_predictor",
     size = "medium",
     srcs = ["tests/test_lightning_predictor.py"],
+    tags = ["team:ml", "exclusive", "ray_air", "gpu", "ptl_v2"],
+    deps = [":train_lib"]
+)
+
+py_test(
+    name = "test_lightning_deepspeed",
+    size = "large",
+    srcs = ["tests/test_lightning_deepspeed.py"],
     tags = ["team:ml", "exclusive", "ray_air", "gpu", "ptl_v2"],
     deps = [":train_lib"]
 )
@@ -490,7 +528,7 @@ py_test(
 
 py_test(
     name = "test_torch_predictor",
-    size = "small",
+    size = "medium",
     srcs = ["tests/test_torch_predictor.py"],
     tags = ["team:ml", "exclusive", "ray_air", "gpu"],
     deps = [":train_lib", ":conftest"]
@@ -554,7 +592,7 @@ py_test(
 
 py_test(
     name = "test_transformers_trainer_steps",
-    size = "large",
+    size = "enormous", # TODO: Reduce this.
     srcs = ["tests/test_transformers_trainer_steps.py"],
     tags = ["team:ml", "exclusive", "ray_air"],
     deps = [":train_lib"]
@@ -618,7 +656,7 @@ py_test(
 
 py_test(
     name = "test_trainer_restore",
-    size = "medium",
+    size = "large",
     srcs = ["tests/test_trainer_restore.py"],
     tags = [
         "exclusive",

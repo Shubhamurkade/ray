@@ -1,12 +1,13 @@
-from typing import Any, TYPE_CHECKING, Callable, Optional, Union, Iterator, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional, Tuple, Union
 
-from ray.types import ObjectRef
+from ray.data._internal.stats import DatasetStats
 from ray.data.block import Block, BlockMetadata, DataBatch
 from ray.data.iterator import DataIterator
-from ray.data._internal.stats import DatasetStats
+from ray.types import ObjectRef
 
 if TYPE_CHECKING:
     import pyarrow
+
     from ray.data import DatasetPipeline
 
 
@@ -66,6 +67,7 @@ class PipelinedDataIterator(DataIterator):
         local_shuffle_buffer_size: Optional[int] = None,
         local_shuffle_seed: Optional[int] = None,
         _collate_fn: Optional[Callable[[DataBatch], Any]] = None,
+        _finalize_fn: Optional[Callable[[Any], Any]] = None,
         # Deprecated.
         prefetch_blocks: int = 0,
     ) -> Iterator[DataBatch]:
@@ -78,6 +80,7 @@ class PipelinedDataIterator(DataIterator):
             local_shuffle_buffer_size=local_shuffle_buffer_size,
             local_shuffle_seed=local_shuffle_seed,
             _collate_fn=_collate_fn,
+            _finalize_fn=_finalize_fn,
             prefetch_blocks=prefetch_blocks,
         )
 
