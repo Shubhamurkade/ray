@@ -53,17 +53,17 @@ def test_non_terminated_nodes_returns_nodes_in_powered_off_creating_state():
     ]
     vnp.vsphere_sdk_client.vcenter.vm.Power.get.side_effect = [
         MagicMock(state="POWERED_ON"),
-        MagicMock(state="POWERED_OFF")
+        MagicMock(state="POWERED_OFF"),
     ]
     # The 2nd vm is powered off but is in creating status
     vnp.get_matched_tags = MagicMock(
         return_value=(
-            {
-                "ray-cluster-name": "test"},
+            {"ray-cluster-name": "test"},
             {
                 "ray-cluster-name": "test",
                 "custom-tag": "custom-value",
-                "vsphere-node-status": "creating"}
+                "vsphere-node-status": "creating",
+            },
         )
     )
     # The tag filter is none
@@ -81,17 +81,16 @@ def test_non_terminated_nodes_with_custom_tag_filters():
     ]
     vnp.vsphere_sdk_client.vcenter.vm.Power.get.side_effect = [
         MagicMock(state="POWERED_ON"),
-        MagicMock(state="POWERED_OFF")
+        MagicMock(state="POWERED_OFF"),
     ]
     vnp.get_matched_tags = MagicMock(
         return_value=(
-            {
-                "ray-cluster-name": "test",
-                "custom-tag": "custom-value"},
+            {"ray-cluster-name": "test", "custom-tag": "custom-value"},
             {
                 "ray-cluster-name": "test",
                 "custom-tag": "custom-value",
-                "vsphere-node-status": "blabla"}
+                "vsphere-node-status": "blabla",
+            },
         )
     )
     # This time we applied a tag filter, but the 2nd vm is not in creating
@@ -111,15 +110,12 @@ def test_non_terminated_nodes_with_multiple_filters_not_matching():
     ]
     vnp.vsphere_sdk_client.vcenter.vm.Power.get.side_effect = [
         MagicMock(state="POWERED_ON"),
-        MagicMock(state="POWERED_OFF")
+        MagicMock(state="POWERED_OFF"),
     ]
     vnp.get_matched_tags = MagicMock(
         return_value=(
-            {
-                "ray-cluster-name": "test"},
-            {
-                "ray-cluster-name": "test",
-                "vsphere-node-status": "blabla"}
+            {"ray-cluster-name": "test"},
+            {"ray-cluster-name": "test", "vsphere-node-status": "blabla"},
         )
     )
     # tag not much so no VM should be returned this time
@@ -151,12 +147,14 @@ def test_node_tags():
     """Should return cached tags of a node"""
     vnp = mock_vsphere_node_provider()
     vnp.tag_cache_lock = threading.Lock()
-    vnp.tag_cache = {"test_vm_id_1": {
-        "ray-cluster-name": "test",
-        "ray-launch-config": "test_id",
-        "ray-node-type": "head",
-        "ray-node-name": "test-node",
-    }}
+    vnp.tag_cache = {
+        "test_vm_id_1": {
+            "ray-cluster-name": "test",
+            "ray-launch-config": "test_id",
+            "ray-node-type": "head",
+            "ray-node-name": "test-node",
+        }
+    }
 
     tags = vnp.node_tags("test_vm_id_1")
     assert tags == vnp.tag_cache["test_vm_id_1"]
@@ -214,8 +212,7 @@ def test_create_nodes():
 def test_get_vm():
     vnp = mock_vsphere_node_provider()
 
-    vnp.cached_nodes = {
-        "test-1": "instance-1", "test-2": "instance-2"}
+    vnp.cached_nodes = {"test-1": "instance-1", "test-2": "instance-2"}
     vm = vnp.get_vm("test-2")
     assert vm == "instance-2"
 
@@ -224,9 +221,7 @@ def test_get_vm():
 @patch("ray.autoscaler._private.vsphere.node_provider.vim.vm.InstantCloneSpec")
 def test_create_instant_clone_node(mock_ic_spec, mock_relo_spec):
     vnp = mock_vsphere_node_provider()
-    VM.InstantCloneSpec = MagicMock(
-        return_value="Clone Spec"
-    )
+    VM.InstantCloneSpec = MagicMock(return_value="Clone Spec")
     vnp.vsphere_sdk_client.vcenter.VM.instant_clone.return_value = "test_id_1"
     vnp.vsphere_sdk_client.vcenter.vm.Power.stop.return_value = None
     vnp.get_pyvmomi_obj = MagicMock(return_value=MagicMock())
@@ -244,9 +239,7 @@ def test_create_instant_clone_node(mock_ic_spec, mock_relo_spec):
 
     mock_ic_spec.return_value = MagicMock()
     mock_relo_spec.return_value = MagicMock()
-    vm = vnp.create_instant_clone_node(
-        vm_clone_from, "target-vm", node_config, tags
-    )
+    vm = vnp.create_instant_clone_node(vm_clone_from, "target-vm", node_config, tags)
     # assert
     assert vm == "test VM"
 
@@ -286,9 +279,7 @@ def test__create_node():
     assert len(created_nodes_dict) == 2
     vnp.delete_vm.assert_not_called()
     vnp.create_category.assert_called()
-    vnp.attach_tag.assert_called_with(
-        "vm-test", "VirtualMachine", tag_id="tag_id"
-    )
+    vnp.attach_tag.assert_called_with("vm-test", "VirtualMachine", tag_id="tag_id")
     assert vnp.attach_tag.call_count == 2
 
 
@@ -305,9 +296,7 @@ def test_get_tag_return_none():
     vnp = mock_vsphere_node_provider()
     mock_tag = MagicMock()
     mock_tag.name = "ray-node-name"
-    vnp.vsphere_sdk_client.tagging.Tag.list_tags_for_category.return_value = [
-        "tag_1"
-    ]
+    vnp.vsphere_sdk_client.tagging.Tag.list_tags_for_category.return_value = ["tag_1"]
     vnp.vsphere_sdk_client.tagging.Tag.get.return_value = mock_tag
     assert vnp.get_tag("ray-node-name1", "test_category_id") is None
 
@@ -337,12 +326,8 @@ def test_get_category():
 def test_create_category():
     vnp = mock_vsphere_node_provider()
 
-    vnp.vsphere_sdk_client.tagging.Category.CreateSpec.return_value = (
-        "category_spec"
-    )
-    vnp.vsphere_sdk_client.tagging.Category.create.return_value = (
-        "category_id_1"
-    )
+    vnp.vsphere_sdk_client.tagging.Category.CreateSpec.return_value = "category_spec"
+    vnp.vsphere_sdk_client.tagging.Category.create.return_value = "category_id_1"
     category_id = vnp.create_category()
     assert category_id == "category_id_1"
 
@@ -362,9 +347,7 @@ def test_terminate_node():
     vnp.vsphere_sdk_client.vcenter.vm.Power.stop = MagicMock()
     vnp.tag_cache = {}
     vnp.terminate_node("vm_2")
-    vnp.vsphere_sdk_client.vcenter.vm.Power.stop.assert_called_once_with(
-        "vm_2"
-    )
+    vnp.vsphere_sdk_client.vcenter.vm.Power.stop.assert_called_once_with("vm_2")
     assert len(vnp.cached_nodes) == 1
 
 
